@@ -5689,3 +5689,108 @@ if (require.main === module) {
     console.log("Static folder:", STATIC_DIR);
   });
 }
+
+
+
+
+
+
+app.post("/api/media/sign-upload", async (req, res) => {
+  try {
+
+    const kind = String(req.body.kind || "");
+
+    const allowed = new Set([
+      "petri",
+      "lc",
+      "grain"
+    ]);
+
+    if (!allowed.has(kind)) {
+      return res.status(400).json({
+        error: "Type média invalide"
+      });
+    }
+
+    const ext =
+      path.extname(req.body.filename || "")
+        .toLowerCase() || ".jpg";
+
+    const tempPath =
+      `${kind}/${crypto.randomUUID()}${ext}`;
+
+    const { data, error } =
+      await supabase.storage
+        .from("incoming-media")
+        .createSignedUploadUrl(tempPath);
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      bucket: "incoming-media",
+      path: tempPath,
+      token: data.token
+    });
+
+  } catch (e) {
+
+    console.error(e);
+
+    res.status(500).json({
+      error: e.message
+    });
+
+  }
+});
+
+
+
+app.post("/api/media/process", async (req, res) => {
+
+  try {
+
+    const kind = String(req.body.kind || "");
+    const sourcePath =
+      String(req.body.sourcePath || "");
+
+    const response = await fetch(
+      `${process.env.SUPABASE_URL}/functions/v1/convert-image-avif`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "x-media-secret":
+            process.env.MEDIA_PIPELINE_SECRET
+        },
+
+        body: JSON.stringify({
+          kind,
+          sourcePath
+        })
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(
+        result.error ||
+        `Conversion AVIF impossible (${response.status})`
+      );
+    }
+
+    res.json(result);
+
+  } catch (e) {
+
+    console.error(e);
+
+    res.status(500).json({
+      error: e.message
+    });
+
+  }
+
+});
