@@ -1077,6 +1077,24 @@
   <script>
     (function() {
       const API_BASE = window.location.origin;
+      const PETRI_PUBLIC_BASE_URL = "https://dashboard-wine-tau-15.vercel.app";
+
+function petriJournalUrl(petri) {
+  if (!petri) return PETRI_PUBLIC_BASE_URL;
+
+  const isoId =
+    Number(petri.isolement_id || selectedIsoId || 0);
+
+  const petriId =
+    Number(petri.id || 0);
+
+  return (
+    PETRI_PUBLIC_BASE_URL +
+    "/admin-isolement-journal.html" +
+    "?iso=" + encodeURIComponent(isoId) +
+    "&petri=" + encodeURIComponent(petriId)
+  );
+}
 
       let selectedIsoId = null;
       let selectedIso = null;
@@ -1756,6 +1774,7 @@
 
         const phase = Number(petri.phase || 0);
         const codeActuel = makeCode(petri);
+        const qrTarget = petriJournalUrl(petri);
 
         const parent = petri.parent_id ? findPetri(petri.parent_id) : null;
         const grandParent = parent && parent.parent_id ? findPetri(parent.parent_id) : null;
@@ -1819,7 +1838,7 @@
     <div class="brand">Biotech.Agro</div>
     ${lignes.join('\n    ')}
     <div class="line"><strong>Date mise en culture :</strong> ${safe(dateMiseCulture)}</div>
-    <div class="qrbox">${qrSvgFromText(codeActuel)}</div>
+    <div class="qrbox">${qrSvgFromText(qrTarget)}</div>
     <div class="line qrtext">${safe(codeActuel)}</div>
   </div>
 <script>
@@ -1859,6 +1878,7 @@
         const buildLineage = (petri) => {
           const phase = Number(petri.phase || 0);
           const codeActuel = makeCode(petri);
+          const qrTarget = petriJournalUrl(petri);
           const parent = petri.parent_id ? findPetri(petri.parent_id) : null;
           const grandParent = parent && parent.parent_id ? findPetri(parent.parent_id) : null;
 
@@ -1891,8 +1911,8 @@
     <div class="brand">Biotech.Agro</div>
     ${buildLineage(p)}
     <div class="line"><strong>Date mise en culture :</strong> ${safe(dateCulture)}</div>
-    <div class="qrbox">${qrSvgFromText(makeCode(p))}</div>
-    <div class="line qrtext">${safe(makeCode(p))}</div>
+    <div class="qrbox">${qrSvgFromText(petriJournalUrl(p))}</div>
+<div class="line qrtext">${safe(makeCode(p))}</div>
   </div>`;
         }).join("\\n");
 
