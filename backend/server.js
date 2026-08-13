@@ -561,11 +561,14 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/avif',
+  'image/heic',
+  'image/heif',
 ]);
 
 function imageFileFilter(req, file, cb) {
   if (!file || !ALLOWED_IMAGE_MIME_TYPES.has(String(file.mimetype || '').toLowerCase())) {
-    return cb(new Error('Formats photo autorises: JPEG, PNG ou WebP'));
+    return cb(new Error('Formats photo autorises: JPEG, PNG, WebP, AVIF, HEIC ou HEIF'));
   }
   cb(null, true);
 }

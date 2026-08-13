@@ -1265,9 +1265,9 @@
 
           const imgResult = await imgResponse.json();
 
-          if (!imgResult.success) {
-            throw new Error('Erreur upload image');
-          }
+          if (!imgResponse.ok || !imgResult.success) {
+  throw new Error(imgResult.error || `Erreur upload image (${imgResponse.status})`);
+}
 
           console.log('✅ Image uploadée:', imgResult);
           if (imgResult.data && imgResult.data.album_photo_id) {
