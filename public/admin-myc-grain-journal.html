@@ -102,9 +102,37 @@
     const esc = v => String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
     const apiErrorMessage = e => e && e.message ? e.message : String(e || 'Erreur inconnue');
     const fmtDate = v => { if(!v) return '—'; try { return new Date(v).toLocaleDateString('fr-FR'); } catch(_) { return String(v).slice(0,10); } };
-    async function getJSON(url){ const r=await fetch(url); const t=await r.text(); let d=null; try{d=t?JSON.parse(t):null}catch(_){d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.statusText); return d; }
-    async function postJSON(url,payload){ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})}); const t=await r.text(); let d=null; try{d=t?JSON.parse(t):null}catch(_){d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.statusText); return d; }
-    async function postFile(url,file){ const fd=new FormData(); fd.append('photo',file); const r=await fetch(url,{method:'POST',body:fd}); const t=await r.text(); let d=null; try{d=t?JSON.parse(t):null}catch(_){d=t} if(!r.ok) throw new Error((d&&d.error)||t||r.statusText); return d; }
+    async function parseApiResponse(r,url){
+      const t=await r.text();
+      let d=null;
+      try{ d=t?JSON.parse(t):null; }catch(_){ d=null; }
+      if(!r.ok){
+        if(d&&d.error) throw new Error(d.error);
+        if(d&&d.message) throw new Error(d.message);
+        if(/<!doctype html|<html/i.test(t||'')){
+          throw new Error(`API ${r.status}: route indisponible (${url})`);
+        }
+        throw new Error((t||r.statusText||`HTTP ${r.status}`).slice(0,500));
+      }
+      if(t && d===null && /<!doctype html|<html/i.test(t)){
+        throw new Error(`Réponse API invalide pour ${url}`);
+      }
+      return d;
+    }
+    async function getJSON(url){
+      const r=await fetch(url,{headers:{Accept:'application/json'}});
+      return parseApiResponse(r,url);
+    }
+    async function postJSON(url,payload){
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(payload||{})});
+      return parseApiResponse(r,url);
+    }
+    async function postFile(url,file){
+      const fd=new FormData();
+      fd.append('photo',file);
+      const r=await fetch(url,{method:'POST',headers:{Accept:'application/json'},body:fd});
+      return parseApiResponse(r,url);
+    }
     function isStored(u){ const st=String(u?.statut||'').toUpperCase(); return ['STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(st) || !!u?.storage_at; }
     function p3Label(u){ return u?.p3_code || u?.source_petri_code || u?.petri_code || u?.p3_validated_code || u?.p3_valid_code || u?.p3_label || (u?.source_petri_id ? 'P3-' + u.source_petri_id : '—'); }
     function statusBadge(st){ st=String(st||'').toUpperCase(); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(['STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(st))return '<span class="badge-pill ok">Stock</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'; }

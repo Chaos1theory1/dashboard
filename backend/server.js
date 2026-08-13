@@ -3244,6 +3244,10 @@ async function ensureGrainWorkflowSchema() {
       lc_pot_code TEXT,
       inoculated_at TIMESTAMP WITH TIME ZONE,
       inoculation_volume_ml NUMERIC DEFAULT 0,
+      storage_at TIMESTAMP WITH TIME ZONE,
+      storage_location TEXT,
+      storage_note TEXT,
+      storage_operator TEXT,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
       UNIQUE(batch_id, unit_number)
@@ -3316,6 +3320,10 @@ async function ensureGrainWorkflowSchema() {
   await realPool.query(`ALTER TABLE myc_grain_batches ADD COLUMN IF NOT EXISTS p3_code TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS source_petri_id BIGINT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS p3_code TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_at TIMESTAMP WITH TIME ZONE`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_location TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_note TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_operator TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS source_petri_id BIGINT`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS p3_code TEXT`);
 
@@ -3592,6 +3600,150 @@ app.get('/api/grain-units', async (req, res) => {
   } catch (e) {
     console.error('GET /api/grain-units', e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ============================================================
+// GRAIN UNIT SUMMARY / STOCK
+// Used by admin-myc-grain.html and admin-myc-grain-journal.html.
+// ============================================================
+
+// GET /api/grain-units/:id/summary
+// Returns one pot/sac with its preparation/LC source information and journal summary.
+app.get('/api/grain-units/:id/summary', async (req, res) => {
+  try {
+    await ensureGrainWorkflowSchema();
+
+    const unitId = Number(req.params.id || 0);
+    if (!unitId) {
+      return res.status(400).json({ error: 'id pot/sac invalide' });
+    }
+
+    const unitResult = await pool.query(`
+      SELECT
+        u.*,
+        b.code AS batch_code,
+        b.parent_iso_id,
+        b.parent_iso_code,
+        b.champignon,
+        b.type_grain,
+        b.date_preparation,
+        b.notes AS batch_notes,
+        b.lc_code AS batch_lc_code,
+        b.lc_pot_code AS batch_lc_pot_code,
+        COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id) AS resolved_source_petri_id,
+        COALESCE(
+          u.p3_code,
+          b.p3_code,
+          CASE
+            WHEN sp.id IS NOT NULL
+              THEN COALESCE(b.parent_iso_code, ll.parent_iso_code, 'ISO') || '-P3-' || sp.id::text
+            WHEN COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id) IS NOT NULL
+              THEN 'P3-' || COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id)::text
+            ELSE NULL
+          END
+        ) AS resolved_p3_code
+      FROM myc_grain_units u
+      JOIN myc_grain_batches b ON b.id = u.batch_id
+      LEFT JOIN lc_lots ll ON ll.id = COALESCE(u.lc_lot_id, b.lc_lot_id)
+      LEFT JOIN iso_petris sp
+        ON sp.id = COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id)
+      WHERE u.id = $1
+      LIMIT 1
+    `, [unitId]);
+
+    if (!unitResult.rows.length) {
+      return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
+    }
+
+    const unit = unitResult.rows[0];
+
+    // Keep the field names already expected by both frontends.
+    if (!unit.source_petri_id && unit.resolved_source_petri_id) {
+      unit.source_petri_id = unit.resolved_source_petri_id;
+    }
+    if (!unit.p3_code && unit.resolved_p3_code) {
+      unit.p3_code = unit.resolved_p3_code;
+    }
+    delete unit.resolved_source_petri_id;
+    delete unit.resolved_p3_code;
+
+    const journalResult = await pool.query(`
+      SELECT
+        j.*,
+        ref.file_url AS batch_reference_url
+      FROM myc_grain_journal j
+      LEFT JOIN myc_grain_reference_images ref
+        ON ref.batch_id = j.batch_id
+       AND ref.day_index = j.day_index
+      WHERE j.grain_unit_id = $1
+      ORDER BY j.day_index DESC, j.treated_at DESC, j.id DESC
+    `, [unitId]);
+
+    const journal = journalResult.rows || [];
+    const lastEntry = journal.length ? journal[0] : null;
+
+    return res.json({
+      success: true,
+      unit,
+      summary: {
+        journal_count: journal.length,
+        last_entry: lastEntry,
+        first_entry: journal.length ? journal[journal.length - 1] : null,
+        history: journal
+      }
+    });
+  } catch (e) {
+    console.error('GET /api/grain-units/:id/summary', e);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/grain-units/:id/stock
+// Marks a pot/sac as stored and persists its storage information.
+app.post('/api/grain-units/:id/stock', async (req, res) => {
+  try {
+    await ensureGrainWorkflowSchema();
+
+    const unitId = Number(req.params.id || 0);
+    if (!unitId) {
+      return res.status(400).json({ error: 'id pot/sac invalide' });
+    }
+
+    const body = req.body || {};
+    const storageLocation = String(body.storage_location || '').trim();
+    const storageNote = String(body.storage_note || '').trim();
+    const storageOperator = String(
+      body.storage_operator ||
+      (req.adminSession && req.adminSession.username) ||
+      'Admin'
+    ).trim();
+
+    const updated = await pool.query(`
+      UPDATE myc_grain_units
+      SET statut = 'STOCK',
+          storage_at = COALESCE(storage_at, now()),
+          storage_location = $2,
+          storage_note = $3,
+          storage_operator = $4,
+          updated_at = now()
+      WHERE id = $1
+      RETURNING *
+    `, [unitId, storageLocation, storageNote, storageOperator]);
+
+    if (!updated.rows.length) {
+      return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Pot/sac grain mis au stock.',
+      unit: updated.rows[0]
+    });
+  } catch (e) {
+    console.error('POST /api/grain-units/:id/stock', e);
+    return res.status(500).json({ error: e.message });
   }
 });
 

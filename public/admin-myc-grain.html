@@ -275,9 +275,33 @@
     function selectedLcFromSelect(id){const val=$(id)?.value||'';return validLcs.find(l=>lcKey(l)===val)||null}
     function statusBadge(st){st=String(st||'').toUpperCase(); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK'||st==='EN_STOCK'||st==='STOCKE'||st==='STOCKEE'||st==='FRIGO')return '<span class="badge-pill ok">Stock</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
     function apiErrorMessage(e){return e && e.message ? e.message : 'Erreur API inconnue'}
-    async function getJSON(path){const r=await fetch(API_BASE+path,{headers:{Accept:'application/json'}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
-    async function postJSON(path,data){const r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(data||{})});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
-    async function postFile(path,file){const fd=new FormData();fd.append('photo',file);const r=await fetch(API_BASE+path,{method:'POST',body:fd});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+    async function parseApiResponse(r,path){
+      const text=await r.text();
+      let data=null;
+      try{data=text?JSON.parse(text):null}catch(_){data=null}
+      if(!r.ok){
+        if(data&&data.error)throw new Error(data.error);
+        if(data&&data.message)throw new Error(data.message);
+        if(/<!doctype html|<html/i.test(text||''))throw new Error(`API ${r.status}: route indisponible (${path})`);
+        throw new Error((text||r.statusText||`HTTP ${r.status}`).slice(0,500));
+      }
+      if(text&&data===null&&/<!doctype html|<html/i.test(text))throw new Error(`Réponse API invalide pour ${path}`);
+      return data;
+    }
+    async function getJSON(path){
+      const r=await fetch(API_BASE+path,{headers:{Accept:'application/json'}});
+      return parseApiResponse(r,path);
+    }
+    async function postJSON(path,data){
+      const r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(data||{})});
+      return parseApiResponse(r,path);
+    }
+    async function postFile(path,file){
+      const fd=new FormData();
+      fd.append('photo',file);
+      const r=await fetch(API_BASE+path,{method:'POST',headers:{Accept:'application/json'},body:fd});
+      return parseApiResponse(r,path);
+    }
 
     function uniqBy(arr,keyFn){const m=new Map();arr.forEach(x=>{const k=keyFn(x);if(k&&!m.has(k))m.set(k,x)});return Array.from(m.values())}
     async function loadValidatedLcs(){
