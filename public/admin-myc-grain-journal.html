@@ -94,7 +94,11 @@
       if (navbar) { let lastScroll = 0; window.addEventListener("scroll", () => { const current = window.pageYOffset || document.documentElement.scrollTop; if (current > lastScroll && current > 80) navbar.classList.add("nav-hidden"); else navbar.classList.remove("nav-hidden"); lastScroll = current; }); }
     });
   </script>
-  <script src="js/media-avif-upload.js"></script>
+ <script
+  src="/js/media-avif-upload.js?v=20260816-1"
+  onload="console.log('✅ Module AVIF chargé')"
+  onerror="console.error('❌ Impossible de charger le module AVIF')">
+</script>
   <script>
   (function(){
     let units = [], currentUnit = null, journalEntries = [], selectedDay = 0, pendingPhotoUrl = '';

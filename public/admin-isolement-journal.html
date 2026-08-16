@@ -694,7 +694,11 @@
 
 
 
-<script src="js/media-avif-upload.js"></script>
+<script
+  src="/js/media-avif-upload.js?v=20260816-1"
+  onload="console.log('✅ Module AVIF chargé')"
+  onerror="console.error('❌ Impossible de charger le module AVIF')">
+</script>
 
   <script>
     // ==================================================
@@ -1210,6 +1214,87 @@
       }
     }
 
+
+
+
+async function ensureAvifModule() {
+  if (typeof window.uploadLabImage === 'function') {
+    return true;
+  }
+
+  console.warn(
+    'Module AVIF absent. Tentative de chargement...'
+  );
+
+  await new Promise((resolve, reject) => {
+
+    const existing =
+      document.querySelector(
+        'script[data-avif-module="1"]'
+      );
+
+    if (existing) {
+      existing.remove();
+    }
+
+    const script =
+      document.createElement('script');
+
+    script.src =
+      '/js/media-avif-upload.js?v=' +
+      Date.now();
+
+    script.async = true;
+
+    script.dataset.avifModule =
+      '1';
+
+    script.onload = () => {
+      if (
+        typeof window.uploadLabImage ===
+        'function'
+      ) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            'Le fichier AVIF est chargé mais uploadLabImage est absent.'
+          )
+        );
+      }
+    };
+
+    script.onerror = () => {
+      reject(
+        new Error(
+          'Impossible de charger /js/media-avif-upload.js'
+        )
+      );
+    };
+
+    document.head.appendChild(
+      script
+    );
+
+  });
+
+  return (
+    typeof window.uploadLabImage ===
+    'function'
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
     // ==================================================
     // SAUVEGARDER UNE OBSERVATION
     // ==================================================
@@ -1259,11 +1344,19 @@
         // Upload hybride: navigateur -> Supabase temporaire -> Edge Function -> AVIF final.
         // Ensuite on enregistre uniquement l'URL AVIF dans le système album/référence existant.
         if (photoInput.files[0]) {
-          if (typeof window.uploadLabImage !== 'function') {
-            throw new Error('Module AVIF non chargé');
-          }
+          await ensureAvifModule();
 
-          const converted = await window.uploadLabImage(
+if (
+  typeof window.uploadLabImage !==
+  'function'
+) {
+  throw new Error(
+    'Module AVIF impossible à charger'
+  );
+}
+
+const converted =
+  await window.uploadLabImage(
             photoInput.files[0],
             'petri',
             status => {
