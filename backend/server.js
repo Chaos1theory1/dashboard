@@ -5680,6 +5680,68 @@ app.get("/api/scan/resolve", async (req, res) => {
 });
 
 
+// ============================================================
+// PETRI QR SHORT LINK
+// Example:
+// /p/52
+// redirects to:
+// /admin-isolement-journal.html?iso=261&petri=52
+// ============================================================
+
+app.get("/p/:id", async (req, res) => {
+  try {
+    const petriId = Number(req.params.id || 0);
+
+    if (!petriId) {
+      return res
+        .status(400)
+        .send("Identifiant Petri invalide");
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        isolement_id
+      FROM iso_petris
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [petriId]
+    );
+
+    if (!result.rows.length) {
+      return res
+        .status(404)
+        .send("Boîte de Petri introuvable");
+    }
+
+    const petri = result.rows[0];
+
+    return res.redirect(
+      302,
+      `/admin-isolement-journal.html?iso=${encodeURIComponent(
+        petri.isolement_id
+      )}&petri=${encodeURIComponent(
+        petri.id
+      )}`
+    );
+
+  } catch (error) {
+    console.error(
+      "GET /p/:id",
+      error
+    );
+
+    return res
+      .status(500)
+      .send(
+        "Erreur ouverture du journal Petri"
+      );
+  }
+});
+
+
 module.exports = app;
 
 // Local development only. Vercel imports the Express application directly.

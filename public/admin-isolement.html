@@ -1080,19 +1080,21 @@
       const PETRI_PUBLIC_BASE_URL = "https://dashboard-wine-tau-15.vercel.app";
 
 function petriJournalUrl(petri) {
-  if (!petri) return PETRI_PUBLIC_BASE_URL;
-
-  const isoId =
-    Number(petri.isolement_id || selectedIsoId || 0);
+  if (!petri) {
+    return PETRI_PUBLIC_BASE_URL;
+  }
 
   const petriId =
     Number(petri.id || 0);
 
+  if (!petriId) {
+    return PETRI_PUBLIC_BASE_URL;
+  }
+
   return (
     PETRI_PUBLIC_BASE_URL +
-    "/admin-isolement-journal.html" +
-    "?iso=" + encodeURIComponent(isoId) +
-    "&petri=" + encodeURIComponent(petriId)
+    "/p/" +
+    encodeURIComponent(petriId)
   );
 }
 
