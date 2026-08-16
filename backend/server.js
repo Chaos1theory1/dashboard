@@ -5703,8 +5703,9 @@ app.get("/api/scan/resolve", async (req, res) => {
 
 // ============================================================
 // HYBRID LAB IMAGE PIPELINE
-// Browser -> signed Supabase temporary upload -> Edge AVIF conversion.
-// The binary image never passes through this Vercel/Express function.
+// Browser -> signed Supabase temporary upload -> Vercel/Sharp AVIF conversion.
+// The original browser upload goes directly to Supabase; only the downloaded temporary
+// object is processed server-side by this Vercel/Express function.
 // ============================================================
 const MEDIA_KINDS = new Set(["petri", "lc", "grain"]);
 const MEDIA_INPUT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".avif", ".heic", ".heif"]);
@@ -5724,12 +5725,58 @@ function validateTemporaryMediaPath(kind, value) {
   return sourcePath;
 }
 
+function validateMediaEntityId(kind, value) {
+  const entityId = Number(value || 0);
+  if (!Number.isInteger(entityId) || entityId <= 0) {
+    const labels = { petri: "Petri ID", lc: "LC pot ID", grain: "grain unit ID" };
+    throw new Error(`${labels[kind] || "entityId"} manquant ou invalide`);
+  }
+  return entityId;
+}
+
+function validateMediaClientTimestamp(value) {
+  const stamp = String(value || "").trim();
+  if (/^\d{8}-\d{6}$/.test(stamp)) return stamp;
+
+  // Fallback if an older client calls the API without the new local timestamp.
+  const d = new Date();
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  const ss = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+}
+
+async function ensureMediaEntityExists(kind, entityId) {
+  let result;
+
+  if (kind === "petri") {
+    result = await pool.query(`SELECT id FROM iso_petris WHERE id=$1 LIMIT 1`, [entityId]);
+  } else if (kind === "lc") {
+    await ensureLcPotWorkflowSchema();
+    result = await pool.query(`SELECT id FROM lc_pots WHERE id=$1 LIMIT 1`, [entityId]);
+  } else if (kind === "grain") {
+    await ensureGrainWorkflowSchema();
+    result = await pool.query(`SELECT id FROM myc_grain_units WHERE id=$1 LIMIT 1`, [entityId]);
+  }
+
+  if (!result || !result.rows || !result.rows.length) {
+    throw new Error(`Objet ${kind} introuvable pour ID ${entityId}`);
+  }
+}
+
 app.post("/api/media/sign-upload", async (req, res) => {
   try {
     const kind = validateMediaKind(req.body && req.body.kind);
+    const entityId = validateMediaEntityId(kind, req.body && req.body.entityId);
+    const clientTimestamp = validateMediaClientTimestamp(req.body && req.body.clientTimestamp);
     const originalName = String((req.body && req.body.filename) || "photo.jpg");
     const contentType = String((req.body && req.body.contentType) || "").toLowerCase();
     const size = Number((req.body && req.body.size) || 0);
+
+    await ensureMediaEntityExists(kind, entityId);
 
     let ext = path.extname(originalName).toLowerCase();
     if (!MEDIA_INPUT_EXTENSIONS.has(ext)) ext = ".jpg";
@@ -5744,7 +5791,8 @@ app.post("/api/media/sign-upload", async (req, res) => {
       });
     }
 
-    const tempPath = `${kind}/${Date.now()}-${crypto.randomUUID()}${ext}`;
+    // Keep the object ID in the temporary path too, which makes diagnostics easier.
+    const tempPath = `${kind}/${clientTimestamp}-${entityId}-${crypto.randomUUID()}${ext}`;
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.storage
       .from("incoming-media")
@@ -5757,7 +5805,9 @@ app.post("/api/media/sign-upload", async (req, res) => {
       success: true,
       bucket: "incoming-media",
       path: tempPath,
-      token: data.token
+      token: data.token,
+      entityId,
+      clientTimestamp
     });
   } catch (e) {
     console.error("POST /api/media/sign-upload", e);
@@ -5768,7 +5818,11 @@ app.post("/api/media/sign-upload", async (req, res) => {
 app.post("/api/media/process", async (req, res) => {
   try {
     const kind = validateMediaKind(req.body && req.body.kind);
+    const entityId = validateMediaEntityId(kind, req.body && req.body.entityId);
+    const clientTimestamp = validateMediaClientTimestamp(req.body && req.body.clientTimestamp);
     const sourcePath = validateTemporaryMediaPath(kind, req.body && req.body.sourcePath);
+
+    await ensureMediaEntityExists(kind, entityId);
 
     // Final AVIF profiles. The browser already performs a first resize/compression,
     // and Sharp applies a second safety resize before AVIF encoding.
@@ -5847,13 +5901,14 @@ app.post("/api/media/process", async (req, res) => {
       `${Math.round(avifBuffer.length / 1024)} KB`
     );
 
-    // 3) Generate a unique permanent .avif filename.
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/\D/g, "")
-      .slice(0, 14);
-    const random = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
-    const finalName = `${profile.prefix}-${timestamp}-${random}.avif`;
+    // 3) Permanent traceable filename:
+    //    Petri #287      -> ISOIMG-20260816-155141-287.avif
+    //    LC pot #84      -> LCIMG-20260816-155141-84.avif
+    //    Grain unit #52  -> GRAINIMG-20260816-155141-52.avif
+    //
+    // clientTimestamp comes from the device/browser so the visible time follows
+    // the operator's local clock instead of Vercel's UTC runtime.
+    const finalName = `${profile.prefix}-${clientTimestamp}-${entityId}.avif`;
 
     // 4) Upload the permanent AVIF to the existing final bucket.
     const { error: uploadError } = await supabase.storage
@@ -5897,6 +5952,8 @@ app.post("/api/media/process", async (req, res) => {
     return res.json({
       success: true,
       kind,
+      entityId,
+      clientTimestamp,
       bucket: profile.bucket,
       filename: finalName,
       file_url: fileUrl,

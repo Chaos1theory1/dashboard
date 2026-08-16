@@ -1132,6 +1132,8 @@ async function uploadPhoto(day){
   if(typeof window.uploadLabImage!=='function')throw new Error('Module AVIF non charge');
   const result=await window.uploadLabImage(file,'lc',status=>{
     console.log('[LC AVIF]',status);
+  },{
+    entityId:Number(selectedPot.id)
   });
   if(!result.file_url)throw new Error('URL LC AVIF manquante');
   return result.file_url;
@@ -1773,7 +1775,7 @@ setInterval(()=>{
  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script
-  src="/js/media-avif-upload.js?v=20260816-2"
+  src="/js/media-avif-upload.js?v=20260816-3"
   onload="console.log('✅ Fichier AVIF téléchargé')"
   onerror="console.error('❌ Fichier AVIF impossible à télécharger')">
 </script>

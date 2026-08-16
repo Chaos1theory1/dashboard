@@ -697,7 +697,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script
-  src="/js/media-avif-upload.js?v=20260816-2"
+  src="/js/media-avif-upload.js?v=20260816-3"
   onload="console.log('✅ Fichier AVIF téléchargé')"
   onerror="console.error('❌ Fichier AVIF impossible à télécharger')">
 </script>
@@ -1364,6 +1364,9 @@ const converted =
             status => {
               const preview = document.getElementById(`preview-${day}`);
               if (preview) preview.innerHTML = `<div style="padding:20px;color:#666;font-weight:700;">${status}</div>`;
+            },
+            {
+              entityId: Number(currentPetriId)
             }
           );
 

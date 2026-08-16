@@ -384,8 +384,17 @@
   async function uploadLabImage(
     file,
     kind,
-    onStatus
+    onStatus,
+    metadata
   ) {
+
+
+metadata =
+  metadata &&
+  typeof metadata === "object"
+    ? metadata
+    : {};
+
 
     if (!PROFILES[kind]) {
 
@@ -466,7 +475,9 @@
                 "application/octet-stream",
 
               size:
-                preparedFile.size
+                preparedFile.size,
+                entityId: 
+                metadata.entityId || null
             })
         }
       );
@@ -559,13 +570,15 @@
           },
 
           body:
-            JSON.stringify({
-              kind:
-                kind,
+  JSON.stringify({
+    kind: kind,
 
-              sourcePath:
-                signed.path
-            })
+    sourcePath:
+      signed.path,
+
+    entityId:
+      metadata.entityId || null
+  })
         }
       );
 
