@@ -694,7 +694,6 @@
 
 
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/media-avif-upload.js"></script>
 
   <script>
@@ -1257,33 +1256,50 @@
 
         console.log('✅ Observation sauvegardée:', result);
 
-        // Upload de l'image seulement si une nouvelle photo a été choisie.
+        // Upload hybride: navigateur -> Supabase temporaire -> Edge Function -> AVIF final.
+        // Ensuite on enregistre uniquement l'URL AVIF dans le système album/référence existant.
         if (photoInput.files[0]) {
-          const formData = new FormData();
-          formData.append('photo', photoInput.files[0]);
-          formData.append('id_boite', currentBox.id_boite);
-          formData.append('jour_cycle', day);
-          formData.append('id_observation', result.data.id_observation);
-          formData.append('type_image', 'actuelle');
-          formData.append('operateur', data.operateur);
+          if (typeof window.uploadLabImage !== 'function') {
+            throw new Error('Module AVIF non chargé');
+          }
+
+          const converted = await window.uploadLabImage(
+            photoInput.files[0],
+            'petri',
+            status => {
+              const preview = document.getElementById(`preview-${day}`);
+              if (preview) preview.innerHTML = `<div style="padding:20px;color:#666;font-weight:700;">${status}</div>`;
+            }
+          );
+
+          if (!converted.file_url) {
+            throw new Error('Conversion Petri AVIF sans URL');
+          }
 
           const imgResponse = await fetch(`${API_URL}/journal/image`, {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id_boite: currentBox.id_boite,
+              jour_cycle: day,
+              id_observation: result.data.id_observation,
+              type_image: 'actuelle',
+              operateur: data.operateur,
+              file_url: converted.file_url
+            })
           });
 
-          const imgResult = await imgResponse.json();
-
+          const imgResult = await imgResponse.json().catch(() => ({}));
           if (!imgResponse.ok || !imgResult.success) {
-  throw new Error(imgResult.error || `Erreur upload image (${imgResponse.status})`);
-}
+            throw new Error(imgResult.error || `Erreur enregistrement image (${imgResponse.status})`);
+          }
 
-          console.log('✅ Image uploadée:', imgResult);
+          console.log('✅ Image Petri AVIF enregistrée:', imgResult);
           if (imgResult.data && imgResult.data.album_photo_id) {
             console.log('📁 Photo ajoutée à l’album:', imgResult.data.album_photo_id);
           }
           if (imgResult.data && imgResult.data.is_reference) {
-            alert('🏆 Cette photo est ajoutée à l’album et devient la référence commune du groupe.');
+            alert('🏆 Cette photo AVIF est ajoutée à l’album et devient la référence commune du groupe.');
           }
         }
 

@@ -1129,14 +1129,12 @@ async function uploadPhoto(day){
     let old=selectedPot?journalFor(selectedPot.id,day):null;
     return old?.photo_url || '';
   }
-  let fd=new FormData();
-  fd.append('photo',file);
-  fd.append('lc_pot_id',selectedPot.id);
-  fd.append('day_index',day);
-  const r=await fetch(API_BASE+`/api/lc-workflow/lots/${lcId}/upload-photo`,{method:'POST',body:fd});
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(j.error||'Erreur upload photo');
-  return j.file_url || '';
+  if(typeof window.uploadLabImage!=='function')throw new Error('Module AVIF non charge');
+  const result=await window.uploadLabImage(file,'lc',status=>{
+    console.log('[LC AVIF]',status);
+  });
+  if(!result.file_url)throw new Error('URL LC AVIF manquante');
+  return result.file_url;
 }
 
 function labFromQuestions(day){
@@ -1772,6 +1770,7 @@ setInterval(()=>{
 }, 500);
 
 </script>
-  <script src="js/admin-auth.js"></script>
+  <script src="js/media-avif-upload.js"></script>
+<script src="js/admin-auth.js"></script>
 </body>
 </html>

@@ -12,7 +12,9 @@ const { Pool } = require("pg");
 const {
   deleteDemoSupabaseFiles,
   deleteStoredFile,
+  getSupabaseAdmin,
   isVercelRuntime,
+  parseSupabasePublicObjectUrl,
   persistUploadedFile,
   safeExtension,
   shouldUseCloudStorage,
@@ -5194,13 +5196,30 @@ app.post("/api/journal/image", upload.single("photo"), async (req, res) => {
     await ensureReferenceDaySchema();
     let id_observation = Number(req.body.id_observation);
     if (!id_observation) return res.status(400).json({ success: false, error: "id_observation manquant" });
-    if (!req.file) return res.status(400).json({ success: false, error: "photo manquante" });
 
-    const file_url = await persistUploadedFile({
-      file: req.file,
-      folder: "isolements",
-      filename: req.file.filename || generatedUploadName(req, req.file, "ISOIMG"),
-    });
+    // Hybrid AVIF workflow: the browser can send a final Supabase AVIF URL.
+    // Legacy multipart upload remains supported as a fallback while the migration is validated.
+    let file_url = String((req.body && req.body.file_url) || "").trim();
+
+    if (file_url) {
+      const parsed = parseSupabasePublicObjectUrl(file_url);
+      if (!parsed || parsed.bucket !== "isolements" || !/\.avif$/i.test(parsed.objectPath)) {
+        return res.status(400).json({
+          success: false,
+          error: "URL AVIF Petri non autorisee"
+        });
+      }
+    } else {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: "photo ou file_url manquant" });
+      }
+
+      file_url = await persistUploadedFile({
+        file: req.file,
+        folder: "isolements",
+        filename: req.file.filename || generatedUploadName(req, req.file, "ISOIMG"),
+      });
+    }
 
     const cur = await pool.query(
       `SELECT j.id, j.petri_id, j.day_index, j.visual_note20, j.obs,
@@ -5680,6 +5699,119 @@ app.get("/api/scan/resolve", async (req, res) => {
 });
 
 
+
+// ============================================================
+// HYBRID LAB IMAGE PIPELINE
+// Browser -> signed Supabase temporary upload -> Edge AVIF conversion.
+// The binary image never passes through this Vercel/Express function.
+// ============================================================
+const MEDIA_KINDS = new Set(["petri", "lc", "grain"]);
+const MEDIA_INPUT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".avif", ".heic", ".heif"]);
+const MEDIA_MAX_TEMP_BYTES = 5 * 1024 * 1024;
+
+function validateMediaKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  if (!MEDIA_KINDS.has(kind)) throw new Error("Type media invalide: petri, lc ou grain attendu");
+  return kind;
+}
+
+function validateTemporaryMediaPath(kind, value) {
+  const sourcePath = String(value || "").trim().replace(/\\/g, "/");
+  if (!sourcePath || sourcePath.includes("..") || sourcePath.startsWith("/") || !sourcePath.startsWith(`${kind}/`)) {
+    throw new Error("Chemin temporaire media invalide");
+  }
+  return sourcePath;
+}
+
+app.post("/api/media/sign-upload", async (req, res) => {
+  try {
+    const kind = validateMediaKind(req.body && req.body.kind);
+    const originalName = String((req.body && req.body.filename) || "photo.jpg");
+    const contentType = String((req.body && req.body.contentType) || "").toLowerCase();
+    const size = Number((req.body && req.body.size) || 0);
+
+    let ext = path.extname(originalName).toLowerCase();
+    if (!MEDIA_INPUT_EXTENSIONS.has(ext)) ext = ".jpg";
+
+    if (contentType && !contentType.startsWith("image/")) {
+      return res.status(400).json({ success: false, error: "Le fichier doit etre une image" });
+    }
+    if (size && (!Number.isFinite(size) || size < 1 || size > MEDIA_MAX_TEMP_BYTES)) {
+      return res.status(413).json({
+        success: false,
+        error: "Image temporaire trop volumineuse. Maximum 5 MB apres preparation navigateur."
+      });
+    }
+
+    const tempPath = `${kind}/${Date.now()}-${crypto.randomUUID()}${ext}`;
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.storage
+      .from("incoming-media")
+      .createSignedUploadUrl(tempPath, { upsert: false });
+
+    if (error) throw new Error(`Creation URL upload Supabase impossible: ${error.message}`);
+    if (!data || !data.token) throw new Error("Token upload Supabase manquant");
+
+    return res.json({
+      success: true,
+      bucket: "incoming-media",
+      path: tempPath,
+      token: data.token
+    });
+  } catch (e) {
+    console.error("POST /api/media/sign-upload", e);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post("/api/media/process", async (req, res) => {
+  try {
+    const kind = validateMediaKind(req.body && req.body.kind);
+    const sourcePath = validateTemporaryMediaPath(kind, req.body && req.body.sourcePath);
+    const supabaseUrl = String(process.env.SUPABASE_URL || "").trim().replace(/\/$/, "");
+    const pipelineSecret = String(process.env.MEDIA_PIPELINE_SECRET || "").trim();
+
+    if (!supabaseUrl) throw new Error("SUPABASE_URL manquant");
+    if (!pipelineSecret) throw new Error("MEDIA_PIPELINE_SECRET manquant dans Vercel");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55000);
+    let response;
+    try {
+      response = await fetch(`${supabaseUrl}/functions/v1/convert-image-avif`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-media-secret": pipelineSecret
+        },
+        body: JSON.stringify({ kind, sourcePath }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const raw = await response.text();
+    let result = null;
+    try { result = raw ? JSON.parse(raw) : {}; }
+    catch (_) { result = null; }
+
+    if (!response.ok || !result || !result.success) {
+      throw new Error((result && result.error) || raw || `Conversion AVIF impossible (${response.status})`);
+    }
+    if (!result.file_url || !/\.avif(?:$|\?)/i.test(String(result.file_url))) {
+      throw new Error("La fonction AVIF n'a pas retourne une URL .avif valide");
+    }
+
+    return res.json(result);
+  } catch (e) {
+    console.error("POST /api/media/process", e);
+    const message = e && e.name === "AbortError" ? "Conversion AVIF trop longue" : e.message;
+    return res.status(500).json({ success: false, error: message });
+  }
+});
+
+
 // ============================================================
 // PETRI QR SHORT LINK
 // Example:
@@ -5741,7 +5873,6 @@ app.get("/p/:id", async (req, res) => {
   }
 });
 
-
 module.exports = app;
 
 // Local development only. Vercel imports the Express application directly.
@@ -5751,108 +5882,3 @@ if (require.main === module) {
     console.log("Static folder:", STATIC_DIR);
   });
 }
-
-
-
-
-
-
-app.post("/api/media/sign-upload", async (req, res) => {
-  try {
-
-    const kind = String(req.body.kind || "");
-
-    const allowed = new Set([
-      "petri",
-      "lc",
-      "grain"
-    ]);
-
-    if (!allowed.has(kind)) {
-      return res.status(400).json({
-        error: "Type média invalide"
-      });
-    }
-
-    const ext =
-      path.extname(req.body.filename || "")
-        .toLowerCase() || ".jpg";
-
-    const tempPath =
-      `${kind}/${crypto.randomUUID()}${ext}`;
-
-    const { data, error } =
-      await supabase.storage
-        .from("incoming-media")
-        .createSignedUploadUrl(tempPath);
-
-    if (error) throw error;
-
-    res.json({
-      success: true,
-      bucket: "incoming-media",
-      path: tempPath,
-      token: data.token
-    });
-
-  } catch (e) {
-
-    console.error(e);
-
-    res.status(500).json({
-      error: e.message
-    });
-
-  }
-});
-
-
-
-app.post("/api/media/process", async (req, res) => {
-
-  try {
-
-    const kind = String(req.body.kind || "");
-    const sourcePath =
-      String(req.body.sourcePath || "");
-
-    const response = await fetch(
-      `${process.env.SUPABASE_URL}/functions/v1/convert-image-avif`,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-          "x-media-secret":
-            process.env.MEDIA_PIPELINE_SECRET
-        },
-
-        body: JSON.stringify({
-          kind,
-          sourcePath
-        })
-      }
-    );
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      throw new Error(
-        result.error ||
-        `Conversion AVIF impossible (${response.status})`
-      );
-    }
-
-    res.json(result);
-
-  } catch (e) {
-
-    console.error(e);
-
-    res.status(500).json({
-      error: e.message
-    });
-
-  }
-
-});
