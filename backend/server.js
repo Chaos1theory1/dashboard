@@ -1,4 +1,4 @@
-// server.js (COMPLET CORRIGÉ) – BaslyAgro backend
+// server.js (COMPLET CORRIGÉ) – Mycelium Tech Digital backend
 require("dotenv").config();
 
 let path = require("path");
@@ -7,6 +7,7 @@ let express = require("express");
 let cors = require("cors");
 let multer = require("multer");
 let crypto = require("crypto");
+let sharp = require("sharp");
 const { AsyncLocalStorage } = require("async_hooks");
 const { Pool } = require("pg");
 const {
@@ -5768,46 +5769,148 @@ app.post("/api/media/process", async (req, res) => {
   try {
     const kind = validateMediaKind(req.body && req.body.kind);
     const sourcePath = validateTemporaryMediaPath(kind, req.body && req.body.sourcePath);
-    const supabaseUrl = String(process.env.SUPABASE_URL || "").trim().replace(/\/$/, "");
-    const pipelineSecret = String(process.env.MEDIA_PIPELINE_SECRET || "").trim();
 
-    if (!supabaseUrl) throw new Error("SUPABASE_URL manquant");
-    if (!pipelineSecret) throw new Error("MEDIA_PIPELINE_SECRET manquant dans Vercel");
+    // Final AVIF profiles. The browser already performs a first resize/compression,
+    // and Sharp applies a second safety resize before AVIF encoding.
+    const profiles = {
+      petri: {
+        bucket: "isolements",
+        prefix: "ISOIMG",
+        maxDimension: 2560,
+        quality: 68,
+      },
+      lc: {
+        bucket: "lc",
+        prefix: "LCIMG",
+        maxDimension: 2048,
+        quality: 64,
+      },
+      grain: {
+        bucket: "grain",
+        prefix: "GRAINIMG",
+        maxDimension: 2048,
+        quality: 64,
+      },
+    };
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 55000);
-    let response;
-    try {
-      response = await fetch(`${supabaseUrl}/functions/v1/convert-image-avif`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-media-secret": pipelineSecret
-        },
-        body: JSON.stringify({ kind, sourcePath }),
-        signal: controller.signal
+    const profile = profiles[kind];
+    const supabase = getSupabaseAdmin();
+    if (!supabase) throw new Error("Client Supabase serveur indisponible");
+
+    console.log(`[AVIF] Download incoming-media/${sourcePath}`);
+
+    // 1) Download the temporary browser upload directly from Supabase Storage.
+    const { data: sourceFile, error: downloadError } = await supabase.storage
+      .from("incoming-media")
+      .download(sourcePath);
+
+    if (downloadError || !sourceFile) {
+      throw new Error(
+        `Telechargement temporaire impossible: ${
+          (downloadError && downloadError.message) || "fichier introuvable"
+        }`
+      );
+    }
+
+    const inputBuffer = Buffer.from(await sourceFile.arrayBuffer());
+    if (!inputBuffer.length) throw new Error("Image temporaire vide");
+
+    console.log(`[AVIF] Source ${kind}: ${Math.round(inputBuffer.length / 1024)} KB`);
+
+    // 2) Convert in the Vercel Node.js runtime with Sharp.
+    // rotate() applies EXIF orientation. Metadata is stripped by default.
+    // effort: 1 keeps AVIF encoding fast enough for a serverless request.
+    const { data: avifBuffer, info } = await sharp(inputBuffer, {
+      failOn: "none",
+      limitInputPixels: 100000000,
+    })
+      .rotate()
+      .resize({
+        width: profile.maxDimension,
+        height: profile.maxDimension,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .avif({
+        quality: profile.quality,
+        effort: 1,
+        chromaSubsampling: "4:2:0",
+      })
+      .toBuffer({ resolveWithObject: true });
+
+    if (!avifBuffer || !avifBuffer.length) {
+      throw new Error("Conversion AVIF vide");
+    }
+
+    console.log(
+      `[AVIF] Converted ${kind}: ${info.width || "?"}x${info.height || "?"}, ` +
+      `${Math.round(avifBuffer.length / 1024)} KB`
+    );
+
+    // 3) Generate a unique permanent .avif filename.
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/\D/g, "")
+      .slice(0, 14);
+    const random = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
+    const finalName = `${profile.prefix}-${timestamp}-${random}.avif`;
+
+    // 4) Upload the permanent AVIF to the existing final bucket.
+    const { error: uploadError } = await supabase.storage
+      .from(profile.bucket)
+      .upload(finalName, avifBuffer, {
+        contentType: "image/avif",
+        cacheControl: "31536000",
+        upsert: false,
       });
-    } finally {
-      clearTimeout(timeout);
+
+    if (uploadError) {
+      // Keep the temporary source if the permanent upload failed.
+      throw new Error(`Upload AVIF impossible: ${uploadError.message}`);
     }
 
-    const raw = await response.text();
-    let result = null;
-    try { result = raw ? JSON.parse(raw) : {}; }
-    catch (_) { result = null; }
+    const { data: publicData } = supabase.storage
+      .from(profile.bucket)
+      .getPublicUrl(finalName);
 
-    if (!response.ok || !result || !result.success) {
-      throw new Error((result && result.error) || raw || `Conversion AVIF impossible (${response.status})`);
-    }
-    if (!result.file_url || !/\.avif(?:$|\?)/i.test(String(result.file_url))) {
-      throw new Error("La fonction AVIF n'a pas retourne une URL .avif valide");
+    const fileUrl = publicData && publicData.publicUrl;
+    if (!fileUrl || !/\.avif(?:$|\?)/i.test(String(fileUrl))) {
+      // The final file exists, so do not delete the temporary source here.
+      throw new Error("Impossible de generer une URL publique AVIF valide");
     }
 
-    return res.json(result);
+    // 5) Delete the temporary original only AFTER the final AVIF exists.
+    const { error: removeError } = await supabase.storage
+      .from("incoming-media")
+      .remove([sourcePath]);
+
+    if (removeError) {
+      // Do not fail the request: the permanent AVIF has already been saved.
+      console.warn(
+        `[AVIF] Temporary file not deleted incoming-media/${sourcePath}:`,
+        removeError.message
+      );
+    }
+
+    console.log(`[AVIF] Final ${kind}: ${fileUrl}`);
+
+    return res.json({
+      success: true,
+      kind,
+      bucket: profile.bucket,
+      filename: finalName,
+      file_url: fileUrl,
+      width: info.width || null,
+      height: info.height || null,
+      original_size: inputBuffer.length,
+      avif_size: avifBuffer.length,
+    });
   } catch (e) {
     console.error("POST /api/media/process", e);
-    const message = e && e.name === "AbortError" ? "Conversion AVIF trop longue" : e.message;
-    return res.status(500).json({ success: false, error: message });
+    return res.status(500).json({
+      success: false,
+      error: (e && e.message) || String(e),
+    });
   }
 });
 
