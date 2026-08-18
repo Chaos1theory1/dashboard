@@ -3205,22 +3205,24 @@ ${labels}
         el.textContent = text || "";
       }
 
-      // Garde le comportement historique du scanner, mais accepte aussi
-      // les nouveaux liens courts /p/:id et les liens complets Vercel.
       function normalizeScanCode(value) {
         let raw = String(value || "").trim();
         if (!raw) return "";
 
+        // Ne change pas la lecture QR historique : on normalise seulement
+        // la valeur APRES que le QR a ete reconnu.
         raw = raw.replace(/[\r\n\t]+/g, "").trim();
 
-        // URL complète, par ex. https://dashboard-wine-tau-15.vercel.app/p/300
+        // Liens complets :
+        // https://dashboard-wine-tau-15.vercel.app/p/300
+        // https://dashboard-wine-tau-15.vercel.app/admin-isolement-journal.html?iso=80&petri=300
         if (/^https?:\/\//i.test(raw)) {
           try {
             const u = new URL(raw);
+
             const shortMatch = u.pathname.match(/^\/p\/(\d+)\/?$/i);
             if (shortMatch) return shortMatch[1];
 
-            // Compatibilité avec un lien direct vers le journal.
             const petri = u.searchParams.get("petri");
             const iso = u.searchParams.get("iso");
             if (petri && /^\d+$/.test(petri)) {
@@ -3233,20 +3235,29 @@ ${labels}
           } catch (_) {}
         }
 
-        // /p/300 ou p/300
+        // Lien complet sans protocole, ex. dashboard-wine-tau-15.vercel.app/p/300
+        const hostShortMatch = raw.match(/^(?:www\.)?[^\/\s]+\/p\/(\d+)\/?$/i);
+        if (hostShortMatch) return hostShortMatch[1];
+
+        // Liens courts /p/300 ou p/300.
         const shortMatch = raw.match(/^\/?p\/(\d+)\/?$/i);
         if (shortMatch) return shortMatch[1];
 
-        raw = raw
-          .replace(/^box:/i, "")
-          .replace(/^boite:/i, "")
-          .replace(/^qr:/i, "")
-          .replace(/\s+/g, "")
-          .trim();
+        // Lien direct relatif vers le journal.
+        // /admin-isolement-journal.html?iso=80&petri=300
+        if (/admin-isolement-journal\.html\?/i.test(raw)) {
+          try {
+            const relativeUrl = new URL(raw, window.location.origin);
+            const petri = relativeUrl.searchParams.get("petri");
+            const iso = relativeUrl.searchParams.get("iso");
+            if (petri && /^\d+$/.test(petri)) {
+              if (iso && /^\d+$/.test(iso)) return `ISO-${iso}-P${petri}`;
+              return petri;
+            }
+          } catch (_) {}
+        }
 
-        if (/^\d+$/.test(raw)) return raw;
-        if (/^P\d+$/i.test(raw)) return raw.toUpperCase();
-        if (/^ISO-\d+-P\d+$/i.test(raw)) return raw.toUpperCase();
+        // Comportement historique pour 300, P300, ISO-80-P300.
         return raw;
       }
 
@@ -3259,42 +3270,29 @@ ${labels}
           return;
         }
 
-        if (input) input.value = code;
-
-        if (!/^\d+$/.test(code) && !/^P\d+$/i.test(code) && !/^ISO-\d+-P\d+$/i.test(code)) {
-          setScanInlineMsg("❌ Format QR invalide. Formats acceptés : 300, P300, ISO-80-P300, /p/300 ou le lien complet https://dashboard-wine-tau-15.vercel.app/p/300.");
-          return;
-        }
-
         setScanInlineMsg("Recherche de la boîte...", false);
 
         try {
-          const response = await fetch(
-            window.location.origin + "/api/scan/resolve?code=" + encodeURIComponent(code),
-            { headers: { Accept: "application/json" } }
-          );
-          const raw = await response.text();
-          let data = {};
-          try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
+          const response = await fetch(window.location.origin + "/api/scan/resolve?code=" + encodeURIComponent(code));
+          const data = await response.json();
 
           if (response.ok && data && data.success && data.redirect_url) {
-            setScanInlineMsg("✅ Boîte trouvée. Ouverture du journal...", false);
             window.location.href = data.redirect_url;
             return;
           }
 
-          throw new Error((data && data.error) || raw || "Boîte introuvable");
+          throw new Error((data && data.error) || "Boîte introuvable");
         } catch (e) {
           const m = code.match(/^ISO-(\d+)-P(\d+)$/i);
           if (m) {
-            window.location.href =
-              "admin-isolement-journal.html?iso=" + encodeURIComponent(m[1]) +
-              "&petri=" + encodeURIComponent(m[2]);
+            window.location.href = "admin-isolement-journal.html?iso=" + encodeURIComponent(m[1]) + "&petri=" + encodeURIComponent(m[2]);
             return;
           }
+
           setScanInlineMsg("❌ " + e.message + " — vérifie le code ou saisis l’ID de la boîte.");
         }
       }
+
 
       function startInlineQrCamera() {
         const cameraInput = document.getElementById("scan-inline-camera-file");
@@ -3302,11 +3300,11 @@ ${labels}
           setScanInlineMsg("Champ caméra introuvable. Recharge la page.");
           return;
         }
+
         setScanInlineMsg("Ouverture appareil photo... Prends le QR en photo.", false);
         cameraInput.click();
       }
 
-      // Le scanner historique attendait les deux bibliothèques avant lecture.
       function waitForInlineQrLibraries(timeoutMs = 2500) {
         const started = Date.now();
         return new Promise((resolve) => {
@@ -3323,25 +3321,16 @@ ${labels}
       function loadInlineImageFromFile(file) {
         return new Promise((resolve, reject) => {
           const img = new Image();
-          const objectUrl = URL.createObjectURL(file);
-          img.onload = () => {
-            URL.revokeObjectURL(objectUrl);
-            resolve(img);
-          };
-          img.onerror = () => {
-            URL.revokeObjectURL(objectUrl);
-            reject(new Error("Image illisible"));
-          };
-          img.src = objectUrl;
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error("Image illisible"));
+          img.src = URL.createObjectURL(file);
         });
       }
 
       function drawInlineQrVariant(img, options) {
         const scale = options.scale || 1;
         const rotate = options.rotate || 0;
-        // Même approche que l'ancien scanner, mais limite légèrement la taille
-        // pour éviter de bloquer le téléphone sur les photos très grandes.
-        const maxSide = 1500;
+        const maxSide = 1800;
         let w = img.naturalWidth || img.width;
         let h = img.naturalHeight || img.height;
         const ratio = Math.min(maxSide / Math.max(w, h), 1) * scale;
@@ -3355,16 +3344,9 @@ ${labels}
         canvas.height = rotated ? w : h;
 
         ctx.save();
-        if (rotate === 90) {
-          ctx.translate(canvas.width, 0);
-          ctx.rotate(Math.PI / 2);
-        } else if (rotate === 180) {
-          ctx.translate(canvas.width, canvas.height);
-          ctx.rotate(Math.PI);
-        } else if (rotate === 270) {
-          ctx.translate(0, canvas.height);
-          ctx.rotate(-Math.PI / 2);
-        }
+        if (rotate === 90) { ctx.translate(canvas.width, 0); ctx.rotate(Math.PI / 2); }
+        if (rotate === 180) { ctx.translate(canvas.width, canvas.height); ctx.rotate(Math.PI); }
+        if (rotate === 270) { ctx.translate(0, canvas.height); ctx.rotate(-Math.PI / 2); }
         ctx.drawImage(img, 0, 0, w, h);
         ctx.restore();
 
@@ -3390,73 +3372,54 @@ ${labels}
         const img = await loadInlineImageFromFile(file);
         const variants = [
           { scale: 1, rotate: 0 },
-          { scale: 1.35, rotate: 0 },
+          { scale: 1.5, rotate: 0 },
+          { scale: 2, rotate: 0 },
           { scale: 1, rotate: 90 },
           { scale: 1, rotate: 180 },
           { scale: 1, rotate: 270 },
-          { scale: 1.25, rotate: 0, gray: true, contrast: 1.5 },
-          { scale: 1.25, rotate: 0, gray: true, contrast: 2.0, threshold: 145 },
-          { scale: 1.25, rotate: 0, gray: true, contrast: 2.0, threshold: 115 }
+          { scale: 1.5, rotate: 0, gray: true, contrast: 1.5 },
+          { scale: 2, rotate: 0, gray: true, contrast: 2 },
+          { scale: 1.5, rotate: 0, gray: true, contrast: 2.2, threshold: 145 },
+          { scale: 1.5, rotate: 0, gray: true, contrast: 2.2, threshold: 115 }
         ];
-
         for (const v of variants) {
-          // Rend la main au navigateur entre deux essais pour éviter l'impression de gel.
-          await new Promise(resolve => setTimeout(resolve, 0));
           const imageData = drawInlineQrVariant(img, v);
-          const result = window.jsQR(
-            imageData.data,
-            imageData.width,
-            imageData.height,
-            { inversionAttempts: "attemptBoth" }
-          );
+          const result = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
           if (result && result.data) return result.data;
         }
         return null;
       }
 
       async function decodeInlineQrImage(file) {
-        if (!file) return null;
         await waitForInlineQrLibraries();
 
-        // 1) html5-qrcode d'abord : c'est le lecteur qui détectait correctement
-        // les QR contenant une URL complète sur beaucoup de téléphones.
-        if (window.Html5Qrcode) {
-          const readerId = "scan-inline-reader-temp";
-          let qr = null;
-          try {
-            qr = new Html5Qrcode(readerId);
-            const decodedText = await qr.scanFile(file, true);
-            if (decodedText) return decodedText;
-          } catch (_) {
-          } finally {
-            if (qr) {
-              try { await qr.clear(); } catch (_) {}
-            }
-          }
-        }
-
-        // 2) API native quand disponible.
-        if ("BarcodeDetector" in window) {
-          let bitmap = null;
-          try {
-            const detector = new BarcodeDetector({ formats: ["qr_code"] });
-            bitmap = await createImageBitmap(file);
-            const codes = await detector.detect(bitmap);
-            if (codes && codes.length && codes[0].rawValue) return codes[0].rawValue;
-          } catch (_) {
-          } finally {
-            if (bitmap && typeof bitmap.close === "function") bitmap.close();
-          }
-        }
-
-        // 3) Ancienne lecture jsQR renforcée en dernier recours.
         try {
           const relaxed = await decodeInlineWithJsQrRelaxed(file);
           if (relaxed) return relaxed;
-        } catch (_) {}
+        } catch (e) {}
+
+        if (window.Html5Qrcode) {
+          const readerId = "scan-inline-reader-temp";
+          const qr = new Html5Qrcode(readerId);
+          try {
+            const decodedText = await qr.scanFile(file, true);
+            if (decodedText) return decodedText;
+          } catch (e) {}
+          try { await qr.clear(); } catch (e) {}
+        }
+
+        if ("BarcodeDetector" in window) {
+          try {
+            const detector = new BarcodeDetector({ formats: ["qr_code"] });
+            const bitmap = await createImageBitmap(file);
+            const codes = await detector.detect(bitmap);
+            if (codes && codes.length) return codes[0].rawValue || "";
+          } catch (e) {}
+        }
 
         return null;
       }
+
 
       function setupInlineQrImport() {
         const inputs = [
@@ -3472,40 +3435,29 @@ ${labels}
             const file = e.target.files && e.target.files[0];
             if (!file) return;
 
-            setScanInlineMsg("Lecture du QR...", false);
+            setScanInlineMsg("Lecture renforcée du QR...", false);
 
             try {
-              const decoded = await decodeInlineQrImage(file);
+              const code = await decodeInlineQrImage(file);
 
-              if (!decoded) {
+              if (!code) {
                 setScanInlineMsg(
-                  "❌ QR non détecté. Reprends la photo bien de face, proche du QR. Tu peux aussi saisir 300, P300, ISO-80-P300 ou /p/300."
+                  "QR non détecté. Reprends la photo bien de face, plus proche, avec lumière forte et marge blanche autour du QR. Sinon écris l’ID puis appuie Ouvrir journal."
                 );
                 return;
               }
 
               const codeInput = document.getElementById("scan-inline-code");
-              if (codeInput) codeInput.value = decoded;
+              if (codeInput) codeInput.value = code;
 
               await openScannedBoxInline();
             } catch (err) {
-              setScanInlineMsg("❌ Erreur lecture QR : " + (err && err.message ? err.message : String(err)));
+              setScanInlineMsg("Erreur lecture QR : " + err.message);
             } finally {
               input.value = "";
             }
           });
         });
-
-        const codeInput = document.getElementById("scan-inline-code");
-        if (codeInput && codeInput.dataset.enterReady !== "1") {
-          codeInput.dataset.enterReady = "1";
-          codeInput.addEventListener("keydown", function(e) {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              openScannedBoxInline();
-            }
-          });
-        }
       }
 
       document.addEventListener("DOMContentLoaded", setupInlineQrImport);

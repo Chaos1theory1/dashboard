@@ -5626,13 +5626,18 @@ app.get("/api/scan/resolve", async (req, res) => {
       });
     }
 
+    // Ne change pas la logique historique de recherche.
+    // On convertit seulement les nouveaux formats de lien vers un code historique.
     code = code.replace(/[\r\n\t]+/g, "").trim();
 
-    // URL complète : extraire /p/:id, les paramètres du journal ou ?code=.
+    // Lien complet :
+    // https://dashboard-wine-tau-15.vercel.app/p/300
+    // https://dashboard-wine-tau-15.vercel.app/admin-isolement-journal.html?iso=80&petri=300
     if (/^https?:\/\//i.test(code)) {
       try {
         const u = new URL(code);
         const shortMatch = u.pathname.match(/^\/p\/(\d+)\/?$/i);
+
         if (shortMatch) {
           code = shortMatch[1];
         } else {
@@ -5651,16 +5656,35 @@ app.get("/api/scan/resolve", async (req, res) => {
       } catch (_) {}
     }
 
-    // URL relative /p/300 ou p/300.
+    // Lien complet sans protocole :
+    // dashboard-wine-tau-15.vercel.app/p/300
+    const hostShortMatch = String(code).match(/^(?:www\.)?[^\/\s]+\/p\/(\d+)\/?$/i);
+    if (hostShortMatch) code = hostShortMatch[1];
+
+    // Lien court : /p/300 ou p/300.
     const relativeShortMatch = String(code).match(/^\/?p\/(\d+)\/?$/i);
     if (relativeShortMatch) code = relativeShortMatch[1];
 
+    // Lien direct relatif vers le journal.
+    if (/admin-isolement-journal\.html\?/i.test(String(code))) {
+      try {
+        const u = new URL(String(code), "https://dashboard-wine-tau-15.vercel.app");
+        const petriParam = u.searchParams.get("petri");
+        const isoParam = u.searchParams.get("iso");
+        if (petriParam && /^\d+$/.test(petriParam)) {
+          code = isoParam && /^\d+$/.test(isoParam)
+            ? `ISO-${isoParam}-P${petriParam}`
+            : petriParam;
+        }
+      } catch (_) {}
+    }
+
+    // Logique historique inchangée à partir d'ici.
     code = String(code)
       .replace(/\s+/g, "")
       .replace(/^box:/i, "")
       .replace(/^boite:/i, "")
-      .replace(/^qr:/i, "")
-      .trim();
+      .replace(/^qr:/i, "");
 
     let isoId = null;
     let petriId = null;
@@ -5679,8 +5703,7 @@ app.get("/api/scan/resolve", async (req, res) => {
       return res.status(400).json({
         success: false,
         error: "Format QR invalide",
-        code_recu: code,
-        formats_acceptes: ["300", "P300", "ISO-80-P300", "/p/300", "https://dashboard-wine-tau-15.vercel.app/p/300"]
+        code_recu: code
       });
     }
 
@@ -5709,27 +5732,31 @@ app.get("/api/scan/resolve", async (req, res) => {
     }
 
     const petri = r.rows[0];
-    const redirectUrl =
-      `/admin-isolement-journal.html?iso=${encodeURIComponent(petri.isolement_id)}&petri=${encodeURIComponent(petri.id)}`;
+
+    if (["STOCK_FRIGO", "CONSERVATION_FRIGORIFIQUE", "STOCK", "CONSERVATION"].includes(String(petri.status || "").toUpperCase())) {
+      return res.json({
+        success: true,
+        redirect_url:
+          `/admin-isolement-journal.html?iso=${petri.isolement_id}&petri=${petri.id}`
+      });
+    }
 
     return res.json({
       success: true,
       box_id: `ISO-${petri.isolement_id}-P${petri.id}`,
-      petri_id: petri.id,
-      isolement_id: petri.isolement_id,
-      redirect_url: redirectUrl
+      redirect_url:
+        `/admin-isolement-journal.html?iso=${petri.isolement_id}&petri=${petri.id}`
     });
 
   } catch (e) {
     console.error("GET /api/scan/resolve", e);
 
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: e.message
     });
   }
 });
-
 
 // ============================================================
 // HYBRID LAB IMAGE PIPELINE
