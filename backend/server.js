@@ -5671,6 +5671,19 @@ app.get("/api/scan/resolve", async (req, res) => {
 
 } catch (_) {}
 
+
+const shortPathMatch =
+  String(code).match(
+    /(?:^|\/)p\/(\d+)\/?$/i
+  );
+
+if (shortPathMatch) {
+  code =
+    shortPathMatch[1];
+}
+
+
+
     code = code
       .replace(/\s+/g, "")
       .replace(/^box:/i, "")
