@@ -5608,87 +5608,59 @@ app.get("/api/ping", async (req, res) => {
 
 
 
-// GET /api/scan/resolve?code=ISO-<isolement_id>-P<petri_id>
-// Accepte aussi P<id> ou <id>.
+// GET /api/scan/resolve?code=...
+// Formats acceptés :
+//   300
+//   P300
+//   ISO-80-P300
+//   /p/300
+//   https://dashboard-wine-tau-15.vercel.app/p/300
 app.get("/api/scan/resolve", async (req, res) => {
   try {
     let code = String(req.query.code || "").trim();
 
-  try {
-
-  if (/^https?:\/\//i.test(code)) {
-
-    const u =
-      new URL(code);
-
-    // -----------------------------------------------
-    // New short QR:
-    // https://dashboard-wine-tau-15.vercel.app/p/300
-    // -----------------------------------------------
-
-    const shortMatch =
-      u.pathname.match(
-        /^\/p\/(\d+)\/?$/i
-      );
-
-    if (shortMatch) {
-
-      code =
-        shortMatch[1];
-
-    } else {
-
-      // Direct Petri journal URL
-      const petriParam =
-        u.searchParams.get(
-          "petri"
-        );
-
-      if (
-        petriParam &&
-        /^\d+$/.test(
-          petriParam
-        )
-      ) {
-
-        code =
-          petriParam;
-
-      } else {
-
-        // Legacy QR URLs
-        code =
-          u.searchParams.get(
-            "code"
-          ) ||
-          code;
-
-      }
-
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        error: "Code QR manquant"
+      });
     }
 
-  }
+    code = code.replace(/[\r\n\t]+/g, "").trim();
 
-} catch (_) {}
+    // URL complète : extraire /p/:id, les paramètres du journal ou ?code=.
+    if (/^https?:\/\//i.test(code)) {
+      try {
+        const u = new URL(code);
+        const shortMatch = u.pathname.match(/^\/p\/(\d+)\/?$/i);
+        if (shortMatch) {
+          code = shortMatch[1];
+        } else {
+          const petriParam = u.searchParams.get("petri");
+          const isoParam = u.searchParams.get("iso");
+          const codeParam = u.searchParams.get("code");
 
+          if (petriParam && /^\d+$/.test(petriParam)) {
+            code = isoParam && /^\d+$/.test(isoParam)
+              ? `ISO-${isoParam}-P${petriParam}`
+              : petriParam;
+          } else if (codeParam) {
+            code = codeParam;
+          }
+        }
+      } catch (_) {}
+    }
 
-const shortPathMatch =
-  String(code).match(
-    /(?:^|\/)p\/(\d+)\/?$/i
-  );
+    // URL relative /p/300 ou p/300.
+    const relativeShortMatch = String(code).match(/^\/?p\/(\d+)\/?$/i);
+    if (relativeShortMatch) code = relativeShortMatch[1];
 
-if (shortPathMatch) {
-  code =
-    shortPathMatch[1];
-}
-
-
-
-    code = code
+    code = String(code)
       .replace(/\s+/g, "")
       .replace(/^box:/i, "")
       .replace(/^boite:/i, "")
-      .replace(/^qr:/i, "");
+      .replace(/^qr:/i, "")
+      .trim();
 
     let isoId = null;
     let petriId = null;
@@ -5707,7 +5679,8 @@ if (shortPathMatch) {
       return res.status(400).json({
         success: false,
         error: "Format QR invalide",
-        code_recu: code
+        code_recu: code,
+        formats_acceptes: ["300", "P300", "ISO-80-P300", "/p/300", "https://dashboard-wine-tau-15.vercel.app/p/300"]
       });
     }
 
@@ -5736,26 +5709,21 @@ if (shortPathMatch) {
     }
 
     const petri = r.rows[0];
-
-    if (["STOCK_FRIGO", "CONSERVATION_FRIGORIFIQUE", "STOCK", "CONSERVATION"].includes(String(petri.status || "").toUpperCase())) {
-      return res.json({
-        success: true,
-        redirect_url:
-          `/admin-isolement-journal.html?iso=${petri.isolement_id}&petri=${petri.id}`
-      });
-    }
+    const redirectUrl =
+      `/admin-isolement-journal.html?iso=${encodeURIComponent(petri.isolement_id)}&petri=${encodeURIComponent(petri.id)}`;
 
     return res.json({
       success: true,
       box_id: `ISO-${petri.isolement_id}-P${petri.id}`,
-      redirect_url:
-        `/admin-isolement-journal.html?iso=${petri.isolement_id}&petri=${petri.id}`
+      petri_id: petri.id,
+      isolement_id: petri.isolement_id,
+      redirect_url: redirectUrl
     });
 
   } catch (e) {
     console.error("GET /api/scan/resolve", e);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: e.message
     });
@@ -5763,12 +5731,10 @@ if (shortPathMatch) {
 });
 
 
-
 // ============================================================
 // HYBRID LAB IMAGE PIPELINE
-// Browser -> signed Supabase temporary upload -> Vercel/Sharp AVIF conversion.
-// The original browser upload goes directly to Supabase; only the downloaded temporary
-// object is processed server-side by this Vercel/Express function.
+// Browser -> signed Supabase temporary upload -> Edge AVIF conversion.
+// The binary image never passes through this Vercel/Express function.
 // ============================================================
 const MEDIA_KINDS = new Set(["petri", "lc", "grain"]);
 const MEDIA_INPUT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".avif", ".heic", ".heif"]);
@@ -5788,58 +5754,12 @@ function validateTemporaryMediaPath(kind, value) {
   return sourcePath;
 }
 
-function validateMediaEntityId(kind, value) {
-  const entityId = Number(value || 0);
-  if (!Number.isInteger(entityId) || entityId <= 0) {
-    const labels = { petri: "Petri ID", lc: "LC pot ID", grain: "grain unit ID" };
-    throw new Error(`${labels[kind] || "entityId"} manquant ou invalide`);
-  }
-  return entityId;
-}
-
-function validateMediaClientTimestamp(value) {
-  const stamp = String(value || "").trim();
-  if (/^\d{8}-\d{6}$/.test(stamp)) return stamp;
-
-  // Fallback if an older client calls the API without the new local timestamp.
-  const d = new Date();
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const hh = String(d.getUTCHours()).padStart(2, "0");
-  const mi = String(d.getUTCMinutes()).padStart(2, "0");
-  const ss = String(d.getUTCSeconds()).padStart(2, "0");
-  return `${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
-}
-
-async function ensureMediaEntityExists(kind, entityId) {
-  let result;
-
-  if (kind === "petri") {
-    result = await pool.query(`SELECT id FROM iso_petris WHERE id=$1 LIMIT 1`, [entityId]);
-  } else if (kind === "lc") {
-    await ensureLcPotWorkflowSchema();
-    result = await pool.query(`SELECT id FROM lc_pots WHERE id=$1 LIMIT 1`, [entityId]);
-  } else if (kind === "grain") {
-    await ensureGrainWorkflowSchema();
-    result = await pool.query(`SELECT id FROM myc_grain_units WHERE id=$1 LIMIT 1`, [entityId]);
-  }
-
-  if (!result || !result.rows || !result.rows.length) {
-    throw new Error(`Objet ${kind} introuvable pour ID ${entityId}`);
-  }
-}
-
 app.post("/api/media/sign-upload", async (req, res) => {
   try {
     const kind = validateMediaKind(req.body && req.body.kind);
-    const entityId = validateMediaEntityId(kind, req.body && req.body.entityId);
-    const clientTimestamp = validateMediaClientTimestamp(req.body && req.body.clientTimestamp);
     const originalName = String((req.body && req.body.filename) || "photo.jpg");
     const contentType = String((req.body && req.body.contentType) || "").toLowerCase();
     const size = Number((req.body && req.body.size) || 0);
-
-    await ensureMediaEntityExists(kind, entityId);
 
     let ext = path.extname(originalName).toLowerCase();
     if (!MEDIA_INPUT_EXTENSIONS.has(ext)) ext = ".jpg";
@@ -5854,8 +5774,7 @@ app.post("/api/media/sign-upload", async (req, res) => {
       });
     }
 
-    // Keep the object ID in the temporary path too, which makes diagnostics easier.
-    const tempPath = `${kind}/${clientTimestamp}-${entityId}-${crypto.randomUUID()}${ext}`;
+    const tempPath = `${kind}/${Date.now()}-${crypto.randomUUID()}${ext}`;
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase.storage
       .from("incoming-media")
@@ -5868,9 +5787,7 @@ app.post("/api/media/sign-upload", async (req, res) => {
       success: true,
       bucket: "incoming-media",
       path: tempPath,
-      token: data.token,
-      entityId,
-      clientTimestamp
+      token: data.token
     });
   } catch (e) {
     console.error("POST /api/media/sign-upload", e);
@@ -5881,11 +5798,7 @@ app.post("/api/media/sign-upload", async (req, res) => {
 app.post("/api/media/process", async (req, res) => {
   try {
     const kind = validateMediaKind(req.body && req.body.kind);
-    const entityId = validateMediaEntityId(kind, req.body && req.body.entityId);
-    const clientTimestamp = validateMediaClientTimestamp(req.body && req.body.clientTimestamp);
     const sourcePath = validateTemporaryMediaPath(kind, req.body && req.body.sourcePath);
-
-    await ensureMediaEntityExists(kind, entityId);
 
     // Final AVIF profiles. The browser already performs a first resize/compression,
     // and Sharp applies a second safety resize before AVIF encoding.
@@ -5964,14 +5877,13 @@ app.post("/api/media/process", async (req, res) => {
       `${Math.round(avifBuffer.length / 1024)} KB`
     );
 
-    // 3) Permanent traceable filename:
-    //    Petri #287      -> ISOIMG-20260816-155141-287.avif
-    //    LC pot #84      -> LCIMG-20260816-155141-84.avif
-    //    Grain unit #52  -> GRAINIMG-20260816-155141-52.avif
-    //
-    // clientTimestamp comes from the device/browser so the visible time follows
-    // the operator's local clock instead of Vercel's UTC runtime.
-    const finalName = `${profile.prefix}-${clientTimestamp}-${entityId}.avif`;
+    // 3) Generate a unique permanent .avif filename.
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/\D/g, "")
+      .slice(0, 14);
+    const random = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
+    const finalName = `${profile.prefix}-${timestamp}-${random}.avif`;
 
     // 4) Upload the permanent AVIF to the existing final bucket.
     const { error: uploadError } = await supabase.storage
@@ -6015,8 +5927,6 @@ app.post("/api/media/process", async (req, res) => {
     return res.json({
       success: true,
       kind,
-      entityId,
-      clientTimestamp,
       bucket: profile.bucket,
       filename: finalName,
       file_url: fileUrl,
