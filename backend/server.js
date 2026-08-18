@@ -5614,12 +5614,62 @@ app.get("/api/scan/resolve", async (req, res) => {
   try {
     let code = String(req.query.code || "").trim();
 
-    try {
-      if (code.startsWith("http")) {
-        let u = new URL(code);
-        code = u.searchParams.get("code") || code;
+  try {
+
+  if (/^https?:\/\//i.test(code)) {
+
+    const u =
+      new URL(code);
+
+    // -----------------------------------------------
+    // New short QR:
+    // https://dashboard-wine-tau-15.vercel.app/p/300
+    // -----------------------------------------------
+
+    const shortMatch =
+      u.pathname.match(
+        /^\/p\/(\d+)\/?$/i
+      );
+
+    if (shortMatch) {
+
+      code =
+        shortMatch[1];
+
+    } else {
+
+      // Direct Petri journal URL
+      const petriParam =
+        u.searchParams.get(
+          "petri"
+        );
+
+      if (
+        petriParam &&
+        /^\d+$/.test(
+          petriParam
+        )
+      ) {
+
+        code =
+          petriParam;
+
+      } else {
+
+        // Legacy QR URLs
+        code =
+          u.searchParams.get(
+            "code"
+          ) ||
+          code;
+
       }
-    } catch (_) {}
+
+    }
+
+  }
+
+} catch (_) {}
 
     code = code
       .replace(/\s+/g, "")

@@ -3228,40 +3228,234 @@ ${labels}
       }
 
       function normalizeScanCode(value) {
-        return String(value || "").trim();
+  let code = String(value || "").trim();
+
+  if (!code) return "";
+
+  // Remove spaces/newlines accidentally returned by QR readers.
+  code = code.replace(/\s+/g, "");
+
+  // ---------------------------------------------------------
+  // Full URL:
+  // https://dashboard-wine-tau-15.vercel.app/p/300
+  // ---------------------------------------------------------
+  try {
+    if (/^https?:\/\//i.test(code)) {
+      const url = new URL(code);
+
+      // Short Petri URL /p/300
+      const shortMatch = url.pathname.match(/^\/p\/(\d+)\/?$/i);
+
+      if (shortMatch) {
+        return shortMatch[1];
       }
 
-      async function openScannedBoxInline() {
-        const input = document.getElementById("scan-inline-code");
-        const code = normalizeScanCode(input ? input.value : "");
+      // Direct journal URL:
+      // /admin-isolement-journal.html?iso=80&petri=300
+      const petriParam = url.searchParams.get("petri");
 
-        if (!code) {
-          setScanInlineMsg("⚠️ Saisis ou scanne le code de la boîte.");
-          return;
-        }
-
-        setScanInlineMsg("Recherche de la boîte...", false);
-
-        try {
-          const response = await fetch(window.location.origin + "/api/scan/resolve?code=" + encodeURIComponent(code));
-          const data = await response.json();
-
-          if (response.ok && data && data.success && data.redirect_url) {
-            window.location.href = data.redirect_url;
-            return;
-          }
-
-          throw new Error((data && data.error) || "Boîte introuvable");
-        } catch (e) {
-          const m = code.match(/^ISO-(\d+)-P(\d+)$/i);
-          if (m) {
-            window.location.href = "admin-isolement-journal.html?iso=" + encodeURIComponent(m[1]) + "&petri=" + encodeURIComponent(m[2]);
-            return;
-          }
-
-          setScanInlineMsg("❌ " + e.message + " — vérifie le code ou saisis l’ID de la boîte.");
-        }
+      if (petriParam && /^\d+$/.test(petriParam)) {
+        return petriParam;
       }
+
+      // Old ?code= format
+      const codeParam = url.searchParams.get("code");
+
+      if (codeParam) {
+        return codeParam.trim();
+      }
+    }
+  } catch (e) {
+    console.warn("URL QR non standard:", code);
+  }
+
+  // ---------------------------------------------------------
+  // Relative URL:
+  // /p/300
+  // p/300
+  // ---------------------------------------------------------
+  const shortPathMatch =
+    code.match(/(?:^|\/)p\/(\d+)\/?$/i);
+
+  if (shortPathMatch) {
+    return shortPathMatch[1];
+  }
+
+  return code;
+}
+
+     
+
+async function openScannedBoxInline() {
+  const input =
+    document.getElementById(
+      "scan-inline-code"
+    );
+
+  const raw =
+    String(
+      input ? input.value : ""
+    ).trim();
+
+  if (!raw) {
+    setScanInlineMsg(
+      "⚠️ Saisis ou scanne le code de la boîte."
+    );
+    return;
+  }
+
+  // -------------------------------------------------------
+  // If QR already contains our short /p/:id URL,
+  // use it directly.
+  // -------------------------------------------------------
+  let shortPetriId = null;
+
+  try {
+
+    if (/^https?:\/\//i.test(raw)) {
+
+      const url =
+        new URL(raw);
+
+      const m =
+        url.pathname.match(
+          /^\/p\/(\d+)\/?$/i
+        );
+
+      if (m) {
+        shortPetriId =
+          Number(m[1]);
+      }
+
+    } else {
+
+      const m =
+        raw.match(
+          /(?:^|\/)p\/(\d+)\/?$/i
+        );
+
+      if (m) {
+        shortPetriId =
+          Number(m[1]);
+      }
+
+    }
+
+  } catch (_) {}
+
+  if (shortPetriId) {
+
+    setScanInlineMsg(
+      "✅ Boîte détectée. Ouverture du journal...",
+      false
+    );
+
+    // Uses your existing Express /p/:id redirect.
+    window.location.href =
+      "/p/" +
+      encodeURIComponent(
+        shortPetriId
+      );
+
+    return;
+  }
+
+  // -------------------------------------------------------
+  // Otherwise normalize ID/code and resolve normally.
+  // -------------------------------------------------------
+  const code =
+    normalizeScanCode(raw);
+
+  if (!code) {
+
+    setScanInlineMsg(
+      "⚠️ QR invalide."
+    );
+
+    return;
+  }
+
+  // Show normalized result in input.
+  if (input) {
+    input.value = code;
+  }
+
+  setScanInlineMsg(
+    "Recherche de la boîte...",
+    false
+  );
+
+  try {
+
+    const response =
+      await fetch(
+        window.location.origin +
+        "/api/scan/resolve?code=" +
+        encodeURIComponent(code)
+      );
+
+    const data =
+      await response.json();
+
+    if (
+      response.ok &&
+      data &&
+      data.success &&
+      data.redirect_url
+    ) {
+
+      setScanInlineMsg(
+        "✅ Boîte trouvée. Ouverture du journal...",
+        false
+      );
+
+      window.location.href =
+        data.redirect_url;
+
+      return;
+    }
+
+    throw new Error(
+      (data && data.error) ||
+      "Boîte introuvable"
+    );
+
+  } catch (e) {
+
+    // ISO-80-P300 fallback
+    const m =
+      code.match(
+        /^ISO-(\d+)-P(\d+)$/i
+      );
+
+    if (m) {
+
+      window.location.href =
+        "/admin-isolement-journal.html" +
+        "?iso=" +
+        encodeURIComponent(m[1]) +
+        "&petri=" +
+        encodeURIComponent(m[2]);
+
+      return;
+    }
+
+    setScanInlineMsg(
+      "❌ " +
+      e.message +
+      " — vérifie le code ou saisis l’ID de la boîte."
+    );
+
+  }
+}
+
+
+
+
+
+
+
+
 
 
       function startInlineQrCamera() {
