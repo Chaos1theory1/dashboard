@@ -753,7 +753,7 @@ app.get('/api/admin/users', requirePermission('users.manage'), async (_req, res)
 const productionModuleLabels = { petri:'Boîtes de Petri',lc:'Mycélium liquide',grain:'Mycélium sur grain' };
 const productionActionLabels = { added:'Ajout du suivi',modified:'Modification du suivi',photo_added:'Photo ajoutée',delete_requested:'Suppression demandée',photo_deleted:'Photo supprimée',delete_approved:'Suppression approuvée',delete_rejected:'Suppression refusée' };
 
-async function loadProductionActivityReport(query) {
+async function loadProductionActivityReport(query, { paginate = false } = {}) {
   await ensureUserManagementSchema();
   const month = String(query.month || '').trim();
   const moduleName = String(query.module || '').trim();
@@ -766,19 +766,40 @@ async function loadProductionActivityReport(query) {
   if (moduleName) { values.push(moduleName); filters.push(`a.module=$${values.length}`); }
   if (userId) { values.push(userId); filters.push(`a.actor_user_id=$${values.length}::uuid`); }
   const where = filters.join(' AND ');
-  const rows = await realPool.query(`
-    SELECT a.id,a.actor_user_id,a.actor_name,a.actor_role,a.module,a.action_type,a.item_id,
-           a.item_label,a.day_index,a.details,a.created_at,
-           to_char(a.created_at AT TIME ZONE 'Europe/Berlin','YYYY-MM-DD') AS activity_day
-    FROM production_activity_log a WHERE ${where}
-    ORDER BY a.created_at DESC,a.id DESC LIMIT 2000
-  `, values);
   const summary = await realPool.query(`
     SELECT count(*)::int AS total_actions,
            count(DISTINCT (a.module,a.item_id))::int AS distinct_items,
            count(DISTINCT (a.created_at AT TIME ZONE 'Europe/Berlin')::date)::int AS active_days
     FROM production_activity_log a WHERE ${where}
   `, values);
+  const summaryRow = summary.rows[0] || { total_actions:0,distinct_items:0,active_days:0 };
+  let pagination = null;
+  let rowValues = values;
+  let rowLimit = 'LIMIT 2000';
+  if (paginate) {
+    const pageSize = 10;
+    const requestedPage = Number.parseInt(String(query.page || '1'), 10);
+    const totalPages = Math.max(1, Math.ceil(summaryRow.total_actions / pageSize));
+    const page = Math.min(Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, totalPages);
+    const offset = (page - 1) * pageSize;
+    rowValues = [...values, pageSize, offset];
+    rowLimit = `LIMIT $${values.length + 1} OFFSET $${values.length + 2}`;
+    pagination = {
+      page,
+      page_size: pageSize,
+      total_items: summaryRow.total_actions,
+      total_pages: totalPages,
+      has_previous: page > 1,
+      has_next: page < totalPages
+    };
+  }
+  const rows = await realPool.query(`
+    SELECT a.id,a.actor_user_id,a.actor_name,a.actor_role,a.module,a.action_type,a.item_id,
+           a.item_label,a.day_index,a.details,a.created_at,
+           to_char(a.created_at AT TIME ZONE 'Europe/Berlin','YYYY-MM-DD') AS activity_day
+    FROM production_activity_log a WHERE ${where}
+    ORDER BY a.created_at DESC,a.id DESC ${rowLimit}
+  `, rowValues);
   let operatorLabel = 'Tous les opérateurs';
   if (userId) {
     const user = await realPool.query(`SELECT username FROM app_users WHERE auth_user_id=$1::uuid`,[userId]);
@@ -786,13 +807,14 @@ async function loadProductionActivityReport(query) {
   }
   return {
     rows: rows.rows,
-    summary: summary.rows[0] || { total_actions:0,distinct_items:0,active_days:0 },
+    summary: summaryRow,
+    pagination,
     filters: { month,operator:operatorLabel,module:moduleName ? productionModuleLabels[moduleName] : 'Tous les modules' }
   };
 }
 
 app.get('/api/admin/production-activity', requirePermission('users.manage'), async (req, res) => {
-  try { res.json(await loadProductionActivityReport(req.query)); }
+  try { res.json(await loadProductionActivityReport(req.query, { paginate:true })); }
   catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
