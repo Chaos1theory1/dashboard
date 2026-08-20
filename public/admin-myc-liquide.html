@@ -1885,7 +1885,7 @@ function lcFridgeAlertHtml(p){
 function lcPotDatesHtml(p){
   let parts=[`Volume ${Number(p.volume_ml||720)} mL`];
   if(p.lc_created_date) parts.push(`Création ${String(p.lc_created_date).slice(0,10)}`);
-  if(p.fridge_stored_at) parts.push(`Stock ${String(p.fridge_stored_at).slice(0,10)}`);
+  if(p.fridge_stored_at) parts.push(`Stocké ${String(p.fridge_stored_at).slice(0,10)}`);
   if(p.fridge_expiry_date) parts.push(`Exp. ${String(p.fridge_expiry_date).slice(0,10)}`);
   return parts.length?`<br><span class="lc-pot-line-small">${parts.join(' · ')}</span>`:'';
 }
