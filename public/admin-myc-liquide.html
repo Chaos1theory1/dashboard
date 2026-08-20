@@ -1736,8 +1736,19 @@ function lcSummaryPhotoCard(photo){
     <img src="${esc(src)}" alt="${esc(photo.title||'Photo LC')}" onclick="window.open(this.src,'_blank')">
     <div class="lc-summary-photo-title">${esc(photo.title||'Photo LC')}</div>
     <div class="lc-summary-photo-note">${esc(photo.note||'')}</div>
+    ${photo.journalId ? `<button type="button" class="btn-main btn-red" style="width:100%;margin-top:8px;" onclick="deleteLcSummaryPhoto(${Number(photo.lotId)},${Number(photo.potId)},${Number(photo.journalId)})">🗑️ Supprimer</button>` : ''}
   </div>`;
 }
+window.deleteLcSummaryPhoto=async function(lotId,potId,journalId){
+  if(!confirm('Supprimer définitivement cette photo LC ?\n\nSa référence commune sera aussi retirée si nécessaire.'))return;
+  try{
+    const r=await fetch(API_BASE+`/api/lc-workflow/lots/${lotId}/journal/${journalId}/photo`,{method:'DELETE'});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(j.error||'Suppression impossible');
+    await resumeLcPotColumn(lotId,potId);
+    if(j.storage_warning)alert('Photo retirée, mais le fichier distant n’a pas pu être supprimé : '+j.storage_warning);
+  }catch(e){alert('❌ '+(e.message||e));}
+};
 function lcSummaryRemarksTable(rows){
   if(!rows.length)return '<div class="lc-summary-empty">Aucune remarque écrite enregistrée pour ce pot.</div>';
   return `<table class="lc-summary-remarks-table">
@@ -1780,17 +1791,17 @@ async function resumeLcPotColumn(lotId,potId){
 
     const photos=[];
     const seen=new Set();
-    function addPhoto(url,title,note){
+    function addPhoto(url,title,note,journalId){
       url=String(url||'').trim();
       if(!url)return;
       const key=url+'|'+title;
       if(seen.has(key))return;
       seen.add(key);
-      photos.push({url,title,note});
+      photos.push({url,title,note,journalId,lotId,potId});
     }
     potJournal.forEach(j=>{
       const jLabel='J'+Number(j.day_index||0);
-      addPhoto(j.photo_url, `${jLabel} — Photo du pot`, j.photo_note || j.observations || 'Photo du jour');
+      addPhoto(j.photo_url, `${jLabel} — Photo du pot`, j.photo_note || j.observations || 'Photo du jour', j.id);
       addPhoto(j.reference_image_url || j.group_reference_url, `${jLabel} — Image de référence`, 'Référence comparative');
     });
 

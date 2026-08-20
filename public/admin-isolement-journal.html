@@ -1063,7 +1063,7 @@
       const refImage = getReferenceImageForDay(day);
       const hasCurrentImage = obs && obs.image_url;
       const currentPreview = hasCurrentImage
-        ? `<img src="${obs.image_url}" style="max-width:100%; border-radius:6px;"><p style="font-size:11px;color:#666;">Photo déjà enregistrée</p>`
+        ? `<img src="${obs.image_url}" style="max-width:100%; border-radius:6px;"><p style="font-size:11px;color:#666;">Photo déjà enregistrée</p>${obs.album_photo_id ? `<button type="button" class="button-primary" style="background:#c0392b!important;margin-top:8px;" onclick="deletePetriJournalPhoto(${day},${Number(obs.album_photo_id)})">🗑️ Supprimer la photo</button>` : ''}`
         : 'Aucune photo';
 
       const questionsHtml = day <= 2 ? '' : `
@@ -1147,7 +1147,7 @@
 
     function createTreatedEntry(day, dateStr, badge, obs) {
       const isRef = obs.is_reference ? '<span style="color:#2fa35a; font-weight:700;"> — Photo référence</span>' : '';
-      const pic = obs.image_url ? `<div style="margin-top:10px;"><img src="${obs.image_url}" style="max-width:220px; border-radius:8px; border:1px solid #ddd;"></div>` : '';
+      const pic = obs.image_url ? `<div style="margin-top:10px;"><img src="${obs.image_url}" style="max-width:220px; border-radius:8px; border:1px solid #ddd;">${obs.album_photo_id ? `<br><button type="button" class="button-primary" style="background:#c0392b!important;margin-top:8px;max-width:220px;" onclick="deletePetriJournalPhoto(${day},${Number(obs.album_photo_id)})">🗑️ Supprimer la photo</button>` : ''}</div>` : '';
       const pickable = obs.is_pickable ? 'Oui' : 'Non';
       const manipulation = obs.manipulation_type || 'Observation quotidienne';
       return `
@@ -1185,6 +1185,19 @@
         </p>
       `;
     }
+
+    window.deletePetriJournalPhoto = async function(day, photoId) {
+      if (!photoId || !confirm(`Supprimer définitivement la photo de J${day} ?\n\nSi elle sert de référence commune, cette référence sera également retirée.`)) return;
+      try {
+        const response = await fetch(`${API_URL}/album-photos/${photoId}`, { method: 'DELETE' });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Suppression impossible');
+        await loadJournalData(currentBox.id_boite);
+        if (result.storage_warning) alert('Photo retirée du journal, mais le fichier distant n’a pas pu être supprimé : ' + result.storage_warning);
+      } catch (e) {
+        alert('❌ ' + (e.message || e));
+      }
+    };
 
     // ==================================================
     // FONCTIONS UTILITAIRES

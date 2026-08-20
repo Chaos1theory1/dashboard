@@ -2302,10 +2302,20 @@ ${labels}
             '<button class="btn-label-print" onclick="printPetriLabelById(' + Number(petri.id) + ')">🖨️ Étiquette</button>' +
           '</div>' +
           '<h5 style="margin-top:18px;">📸 Album photo</h5>' +
-          (album.length ? '<div class="stock-photo-grid">' + album.map(function(ph) { return '<a href="' + htmlEscape(ph.file_url) + '" target="_blank"><img src="' + htmlEscape(ph.file_url) + '" alt="photo boîte"></a>'; }).join('') + '</div>' : '<p style="color:#777;">Aucune photo enregistrée pour cette boîte.</p>');
+          (album.length ? '<div class="stock-photo-grid">' + album.map(function(ph) { return '<div><a href="' + htmlEscape(ph.file_url) + '" target="_blank"><img src="' + htmlEscape(ph.file_url) + '" alt="photo boîte"></a><button type="button" onclick="deletePetriSummaryPhoto(' + Number(petri.id) + ',' + Number(ph.id) + ')" style="width:100%;margin-top:6px;padding:7px;border:0;border-radius:6px;background:#c0392b;color:white;font-weight:700;cursor:pointer;">🗑️ Supprimer</button></div>'; }).join('') + '</div>' : '<p style="color:#777;">Aucune photo enregistrée pour cette boîte.</p>');
         document.getElementById("stock-summary-modal").style.display = "flex";
       }
       window.openStockSummary = openStockSummary;
+      window.deletePetriSummaryPhoto = async function(petriId, photoId) {
+        if (!confirm('Supprimer définitivement cette photo ?\n\nLa référence commune sera aussi retirée si elle utilise cette image.')) return;
+        try {
+          const response = await fetch('/api/album-photos/' + Number(photoId), { method: 'DELETE' });
+          const result = await response.json().catch(function() { return {}; });
+          if (!response.ok) throw new Error(result.error || 'Suppression impossible');
+          await openStockSummary(petriId);
+          if (result.storage_warning) alert('Photo retirée, mais le fichier distant n’a pas pu être supprimé : ' + result.storage_warning);
+        } catch (e) { alert('❌ ' + (e.message || e)); }
+      };
       window.closeStockSummaryModal = function() { document.getElementById("stock-summary-modal").style.display = "none"; };
 
       async function loadPetrisList(isoId) {

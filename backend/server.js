@@ -2973,6 +2973,68 @@ app.post('/api/lc-workflow/lots/:id/journal', async (req, res) => {
   }
 });
 
+// DELETE /api/lc-workflow/lots/:lotId/journal/:journalId/photo
+// Removes the pot photo and any shared J-day reference that points to the same file.
+app.delete('/api/lc-workflow/lots/:lotId/journal/:journalId/photo', async (req, res) => {
+  const client = await pool.connect();
+  let fileUrl = '';
+  try {
+    await ensureLcPotWorkflowSchema();
+    const lotId = Number(req.params.lotId);
+    const journalId = Number(req.params.journalId);
+    if (!lotId || !journalId) return res.status(400).json({ error: 'lot ou journal invalide' });
+
+    await client.query('BEGIN');
+    const found = await client.query(
+      `SELECT id, photo_url FROM lc_pot_journal WHERE id=$1 AND lc_lot_id=$2 FOR UPDATE`,
+      [journalId, lotId]
+    );
+    if (!found.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Photo du journal LC introuvable.' });
+    }
+    fileUrl = String(found.rows[0].photo_url || '').trim();
+    if (!fileUrl) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Aucune photo à supprimer pour cette entrée.' });
+    }
+
+    await client.query(`DELETE FROM lc_reference_day_images WHERE journal_id=$1 OR file_url=$2`, [journalId, fileUrl]);
+    await client.query(
+      `UPDATE lc_pot_journal
+       SET reference_image_url='' WHERE reference_image_url=$1`,
+      [fileUrl]
+    );
+    await client.query(
+      `UPDATE lc_pot_journal
+       SET photo_url='', reference_image_url=CASE WHEN reference_image_url=$2 THEN '' ELSE reference_image_url END,
+           check_photo_done=FALSE
+       WHERE id=$1`,
+      [journalId, fileUrl]
+    );
+    await client.query('COMMIT');
+
+    const refs = await pool.query(
+      `SELECT
+         (SELECT count(*) FROM lc_pot_journal WHERE photo_url=$1 OR reference_image_url=$1) +
+         (SELECT count(*) FROM lc_reference_day_images WHERE file_url=$1) AS total`,
+      [fileUrl]
+    );
+    let storageWarning = '';
+    if (!req.demoMode && Number(refs.rows[0]?.total || 0) === 0) {
+      try { await deleteStoredFile(fileUrl, SITE_DIR); }
+      catch (storageError) { storageWarning = storageError.message || String(storageError); }
+    }
+    res.json({ success: true, storage_warning: storageWarning || undefined });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('DELETE LC journal photo', e);
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 
 
 // Validation persistante d'un pot LC : test gélose + LC validée
@@ -4100,6 +4162,62 @@ app.post('/api/grain-units/:id/journal', async (req, res) => {
   }
 });
 
+// DELETE /api/grain-units/:unitId/journal/:journalId/photo
+app.delete('/api/grain-units/:unitId/journal/:journalId/photo', async (req, res) => {
+  const client = await pool.connect();
+  let fileUrl = '';
+  try {
+    await ensureGrainWorkflowSchema();
+    const unitId = Number(req.params.unitId);
+    const journalId = Number(req.params.journalId);
+    if (!unitId || !journalId) return res.status(400).json({ error: 'pot/sac ou journal invalide' });
+
+    await client.query('BEGIN');
+    const found = await client.query(
+      `SELECT id, photo_url FROM myc_grain_journal WHERE id=$1 AND grain_unit_id=$2 FOR UPDATE`,
+      [journalId, unitId]
+    );
+    if (!found.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Photo du journal grain introuvable.' });
+    }
+    fileUrl = String(found.rows[0].photo_url || '').trim();
+    if (!fileUrl) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Aucune photo à supprimer pour cette entrée.' });
+    }
+
+    await client.query(`DELETE FROM myc_grain_reference_images WHERE journal_id=$1 OR file_url=$2`, [journalId, fileUrl]);
+    await client.query(`UPDATE myc_grain_journal SET reference_image_url='' WHERE reference_image_url=$1`, [fileUrl]);
+    await client.query(
+      `UPDATE myc_grain_journal
+       SET photo_url='', reference_image_url=CASE WHEN reference_image_url=$2 THEN '' ELSE reference_image_url END
+       WHERE id=$1`,
+      [journalId, fileUrl]
+    );
+    await client.query('COMMIT');
+
+    const refs = await pool.query(
+      `SELECT
+         (SELECT count(*) FROM myc_grain_journal WHERE photo_url=$1 OR reference_image_url=$1) +
+         (SELECT count(*) FROM myc_grain_reference_images WHERE file_url=$1) AS total`,
+      [fileUrl]
+    );
+    let storageWarning = '';
+    if (!req.demoMode && Number(refs.rows[0]?.total || 0) === 0) {
+      try { await deleteStoredFile(fileUrl, SITE_DIR); }
+      catch (storageError) { storageWarning = storageError.message || String(storageError); }
+    }
+    res.json({ success: true, storage_warning: storageWarning || undefined });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('DELETE grain journal photo', e);
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.get('/api/grain-protocols', async (req, res) => {
   try {
     await ensureGrainWorkflowSchema();
@@ -4910,7 +5028,10 @@ app.get("/api/journal/:boxId", async (req, res) => {
     // 3) Journal rows (on prend jusqu’à la durée du cycle)
     let journalRes = await pool.query(
       `SELECT id, petri_id, journal_date, day_index, choices, image_url, visual_note20, total_score, obs,
-              manipulation_type, is_pickable, reference_image_url, is_reference, treated_at, operator_name
+              manipulation_type, is_pickable, reference_image_url, is_reference, treated_at, operator_name,
+              (SELECT ap.id FROM iso_petri_album_photos ap
+               WHERE ap.journal_observation_id=iso_petri_journal.id
+               ORDER BY ap.id DESC LIMIT 1) AS album_photo_id
        FROM iso_petri_journal
        WHERE petri_id=$1
        ORDER BY day_index ASC`,
@@ -4944,6 +5065,8 @@ app.get("/api/journal/:boxId", async (req, res) => {
       observations.push({
         jour_cycle: day,
         traite: !!r, // traité si ligne existe
+        journal_id: r ? Number(r.id) : null,
+        album_photo_id: r?.album_photo_id ? Number(r.album_photo_id) : null,
         // champs attendus par le front:
         score_questions: Number(r?.total_score || 0),
         note_evolution: Number(r?.visual_note20 || 10),
@@ -5153,6 +5276,59 @@ app.get("/api/petris/:id/album", async (req, res) => {
   } catch (e) {
     console.error("GET /api/petris/:id/album", e);
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// DELETE /api/album-photos/:id
+// Used by both the isolation journal and the Petri summary album.
+app.delete("/api/album-photos/:id", async (req, res) => {
+  const client = await pool.connect();
+  let fileUrl = '';
+  try {
+    await ensureReferenceDaySchema();
+    const photoId = Number(req.params.id);
+    if (!photoId) return res.status(400).json({ success: false, error: "id photo invalide" });
+
+    await client.query('BEGIN');
+    const found = await client.query(`SELECT * FROM iso_petri_album_photos WHERE id=$1 FOR UPDATE`, [photoId]);
+    if (!found.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: "Photo introuvable" });
+    }
+    const photo = found.rows[0];
+    fileUrl = String(photo.file_url || '').trim();
+
+    await client.query(`DELETE FROM iso_reference_phase_images WHERE album_photo_id=$1 OR file_url=$2`, [photoId, fileUrl]);
+    await client.query(
+      `UPDATE iso_petri_journal
+       SET image_url=CASE WHEN image_url=$2 THEN '' ELSE image_url END,
+           reference_image_url=CASE WHEN reference_image_url=$2 THEN '' ELSE reference_image_url END,
+           is_reference=CASE WHEN image_url=$2 OR reference_image_url=$2 THEN FALSE ELSE is_reference END
+       WHERE id=$1 OR (petri_id=$3 AND (image_url=$2 OR reference_image_url=$2))`,
+      [photo.journal_observation_id, fileUrl, photo.petri_id]
+    );
+    await client.query(`DELETE FROM iso_petri_album_photos WHERE id=$1`, [photoId]);
+    await client.query('COMMIT');
+
+    const refs = await pool.query(
+      `SELECT
+         (SELECT count(*) FROM iso_petri_journal WHERE image_url=$1 OR reference_image_url=$1) +
+         (SELECT count(*) FROM iso_petri_album_photos WHERE file_url=$1) +
+         (SELECT count(*) FROM iso_reference_phase_images WHERE file_url=$1) AS total`,
+      [fileUrl]
+    );
+    let storageWarning = '';
+    if (!req.demoMode && fileUrl && Number(refs.rows[0]?.total || 0) === 0) {
+      try { await deleteStoredFile(fileUrl, SITE_DIR); }
+      catch (storageError) { storageWarning = storageError.message || String(storageError); }
+    }
+    res.json({ success: true, storage_warning: storageWarning || undefined });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error("DELETE /api/album-photos/:id", e);
+    res.status(500).json({ success: false, error: e.message });
+  } finally {
+    client.release();
   }
 });
 

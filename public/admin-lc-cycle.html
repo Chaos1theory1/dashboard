@@ -1012,7 +1012,7 @@ function createDayEntry(day, obs, active){
   let note=Number(obs?.note20??10);
   let score=Number(obs?.magnetic_mix_minutes??0);
   let refImage=getReferenceImageForDay(day);
-  let currentPreview=obs?.photo_url?`<img src="${esc(obs.photo_url)}"><p style="font-size:11px;color:#666;">Photo déjà enregistrée</p>`:'Aucune photo';
+  let currentPreview=obs?.photo_url?`<img src="${esc(obs.photo_url)}"><p style="font-size:11px;color:#666;">Photo déjà enregistrée</p><button type="button" class="btn-main btn-red" style="margin-top:8px;" onclick="deleteLcJournalPhoto(${day},${Number(obs.id)})">🗑️ Supprimer la photo</button>`:'Aucune photo';
   const hasObs = !!obs;
   let choices={
     q1_mycelium_visible: hasObs && obs?.lab_color && obs.lab_color!=='VERT_NOIR',
@@ -1097,7 +1097,7 @@ function createDayEntry(day, obs, active){
 function createTreatedEntry(day, obs){
   const entry=document.createElement('div');
   entry.className='journal-entry treated';
-  let pic=obs?.photo_url?`<div style="margin-top:10px;"><img src="${esc(obs.photo_url)}" style="max-width:220px;border-radius:8px;border:1px solid #ddd;"></div>`:'';
+  let pic=obs?.photo_url?`<div style="margin-top:10px;"><img src="${esc(obs.photo_url)}" style="max-width:220px;border-radius:8px;border:1px solid #ddd;"><br><button type="button" class="btn-main btn-red" style="margin-top:8px;" onclick="deleteLcJournalPhoto(${day},${Number(obs.id)})">🗑️ Supprimer la photo</button></div>`:'';
   entry.innerHTML=`
     <details>
       <summary style="cursor:pointer;font-weight:900;color:#1f7a41;">
@@ -1121,6 +1121,17 @@ function updateScore(day){
 }
 function updateRating(day,value){document.getElementById(`rating-display-${day}`).textContent=`${value} / 20`;}
 function previewImage(day,input){let file=input.files&&input.files[0];if(!file)return;let reader=new FileReader();reader.onload=e=>{document.getElementById(`preview-${day}`).innerHTML=`<img src="${e.target.result}" style="max-width:100%;border-radius:6px;">`;};reader.readAsDataURL(file);}
+
+window.deleteLcJournalPhoto=async function(day,journalId){
+  if(!journalId||!confirm(`Supprimer définitivement la photo LC de J${day} ?\n\nSa référence commune sera aussi retirée si nécessaire.`))return;
+  try{
+    const r=await fetch(API_BASE+`/api/lc-workflow/lots/${lcId}/journal/${journalId}/photo`,{method:'DELETE'});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(j.error||'Suppression impossible');
+    await loadAll(true);
+    if(j.storage_warning)alert('Photo retirée, mais le fichier distant n’a pas pu être supprimé : '+j.storage_warning);
+  }catch(e){alert('❌ '+(e.message||e));}
+};
 
 async function uploadPhoto(day){
   let input=document.getElementById(`photo-${day}`);
