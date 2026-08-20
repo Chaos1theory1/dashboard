@@ -2330,6 +2330,7 @@ ${labels}
           const result = await response.json().catch(function() { return {}; });
           if (!response.ok) throw new Error(result.error || 'Suppression impossible');
           await openStockSummary(petriId);
+          if (result.pending) return alert('⏳ Demande envoyée à un administrateur. La photo reste visible jusqu’à son approbation.');
           if (result.storage_warning) alert('Photo retirée, mais le fichier distant n’a pas pu être supprimé : ' + result.storage_warning);
         } catch (e) { alert('❌ ' + (e.message || e)); }
       };

@@ -175,6 +175,7 @@
         const r=await fetch(`/api/grain-units/${currentUnit.id}/journal/${journalId}/photo`,{method:'DELETE'});
         const data=await parseApiResponse(r,'suppression photo grain');
         if(returnToSummary)await openSummaryForUnit(currentUnit.id,false);else await loadJournalForCurrent();
+        if(data?.pending)return alert('⏳ Demande envoyée à un administrateur. La photo reste visible jusqu’à son approbation.');
         if(data?.storage_warning)alert('Photo retirée, mais le fichier distant n’a pas pu être supprimé : '+data.storage_warning);
       }catch(e){alert('❌ '+apiErrorMessage(e));}
     };

@@ -67,7 +67,8 @@
     if (!obj || !obj.username) return null;
     return {
       username: String(obj.username || obj.user || obj.login || "Admin"),
-      role: obj.role === "visitor" ? "visitor" : "admin",
+      role: ["admin", "operator", "viewer", "visitor"].includes(String(obj.role)) ? String(obj.role) : "operator",
+      must_change_password: !!obj.must_change_password,
       loginAt: obj.loginAt || obj.login_at || new Date().toISOString()
     };
   }
@@ -107,7 +108,8 @@
   function saveUiAuth(user) {
     const auth = {
       username: (user && (user.username || user.user || user.login)) || "Admin",
-      role: user && user.role === "visitor" ? "visitor" : "admin",
+      role: user && ["admin", "operator", "viewer", "visitor"].includes(String(user.role)) ? String(user.role) : "operator",
+      must_change_password: !!(user && user.must_change_password),
       loginAt: new Date().toISOString()
     };
 
@@ -237,7 +239,19 @@
     const name = document.getElementById("mtd-session-user-name");
     if (name) name.textContent = auth.username || (isVisitor ? "Visiteur" : "Admin");
     const role = document.getElementById("mtd-role-pill");
-    if (role) role.textContent = isVisitor ? "👁 Visiteur · Démo" : "🔐 Administrateur";
+    if (role) role.textContent = isVisitor ? "👁 Visiteur · Démo" : auth.role === "admin" ? "🔐 Administrateur" : auth.role === "operator" ? "🧪 Opérateur" : "👁 Lecture seule";
+
+    document.querySelectorAll('.mtd-users-admin-link').forEach(el=>el.remove());
+    const menu=document.querySelector('.admin-menu-bar');
+    if(auth.role==='admin'&&menu){
+      const link=document.createElement('a');
+      link.href='admin-users.html';
+      link.className='mtd-users-admin-link'+(currentPage()==='admin-users.html'?' active':'');
+      link.textContent='Utilisateurs';
+      menu.appendChild(link);
+    }
+    document.querySelectorAll('[data-admin-only]').forEach(el=>{ el.style.display=auth.role==='admin'?'':'none'; });
+    if(currentPage()==='admin-users.html'&&auth.role!=='admin')location.replace('admin.html');
 
     document.documentElement.classList.toggle("mtd-visitor-mode", isVisitor);
     if (document.body) document.body.classList.toggle("mtd-visitor-mode", isVisitor);
@@ -253,6 +267,10 @@
       const data = await res.json();
       if (!data || !data.authenticated) throw new Error("Session inactive");
       const auth = saveUiAuth(data.user || { username: "Admin", role: "admin" });
+      if (auth.must_change_password && currentPage() !== "change-password.html") {
+        location.replace("change-password.html");
+        return auth;
+      }
       if (document.readyState !== "loading") renderSessionChrome(auth);
       return auth;
     } catch (_) {
@@ -274,6 +292,14 @@
     verifyServerSession();
     return auth || { username: "Utilisateur", role: "admin" };
   };
+
+  let heartbeatTimer=null;
+  function startHeartbeat(auth){
+    if(!auth||auth.role==='visitor'||heartbeatTimer)return;
+    const beat=()=>{if(document.visibilityState==='visible')fetch('/api/auth/heartbeat',{method:'POST',credentials:'same-origin',keepalive:true}).catch(()=>{});};
+    beat();
+    heartbeatTimer=setInterval(beat,10*60*1000);
+  }
 
   window.isVisitorMode = function isVisitorMode() {
     const auth = readUiAuth();
@@ -323,7 +349,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     if (currentPage() !== "login-admin.html") {
       renderSessionChrome(readUiAuth());
-      verifyServerSession();
+      verifyServerSession().then(startHeartbeat);
     }
   });
 })();

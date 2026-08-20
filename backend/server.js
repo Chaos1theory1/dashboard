@@ -8,8 +8,11 @@ let cors = require("cors");
 let multer = require("multer");
 let crypto = require("crypto");
 let sharp = require("sharp");
+const ExcelJS = require("exceljs");
+const PDFDocument = require("pdfkit");
 const { AsyncLocalStorage } = require("async_hooks");
 const { Pool } = require("pg");
+const { createClient: createSupabaseClient } = require("@supabase/supabase-js");
 const {
   deleteDemoSupabaseFiles,
   deleteStoredFile,
@@ -66,10 +69,18 @@ function signPayload(payload) {
   return crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
 }
 
-function createSessionToken({ username, role = "admin", hours = SESSION_HOURS }) {
+function createSupabaseLoginClient() {
+  const url = String(process.env.SUPABASE_URL || '').trim();
+  const key = String(process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!url || !key) throw new Error('Supabase Auth non configuré');
+  return createSupabaseClient(url,key,{ auth:{ persistSession:false,autoRefreshToken:false,detectSessionInUrl:false } });
+}
+
+function createSessionToken({ username, role = "admin", userId = null, hours = SESSION_HOURS }) {
   const payload = Buffer.from(JSON.stringify({
     username,
     role,
+    userId,
     sid: crypto.randomBytes(16).toString("hex"),
     exp: Date.now() + Math.max(1, Number(hours || SESSION_HOURS)) * 60 * 60 * 1000
   }), "utf8").toString("base64url");
@@ -87,7 +98,7 @@ function readSession(req) {
     if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return null;
     const data = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
     if (!data || !data.username || !data.exp || Date.now() >= Number(data.exp)) return null;
-    data.role = data.role === "visitor" ? "visitor" : "admin";
+    data.role = String(data.role || "operator");
     if (!data.sid) data.sid = crypto.createHash("sha256").update(parts[0]).digest("hex").slice(0, 32);
     return data;
   } catch (_) {
@@ -95,9 +106,9 @@ function readSession(req) {
   }
 }
 
-function setSessionCookie(req, res, { username, role = "admin" }) {
+function setSessionCookie(req, res, { username, role = "admin", userId = null }) {
   const hours = role === "visitor" ? VISITOR_SESSION_HOURS : SESSION_HOURS;
-  const token = createSessionToken({ username, role, hours });
+  const token = createSessionToken({ username, role, userId, hours });
   const secure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
   const maxAgePart = role === "visitor" ? "" : `; Max-Age=${hours * 60 * 60}`;
   res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${maxAgePart}${secure ? "; Secure" : ""}`);
@@ -108,7 +119,7 @@ function clearSessionCookie(req, res) {
   res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`);
 }
 
-function requireAdminSession(req, res, next) {
+async function requireAdminSession(req, res, next) {
   const session = readSession(req);
   if (!session) {
     if (req.path.startsWith("/api/") || req.originalUrl.startsWith("/api/")) {
@@ -117,21 +128,57 @@ function requireAdminSession(req, res, next) {
     const nextUrl = encodeURIComponent(req.originalUrl || "/admin.html");
     return res.redirect(`/login-admin.html?next=${nextUrl}`);
   }
-  req.adminSession = session;
-  next();
+  try {
+    if (session.role !== "visitor" && session.userId) {
+      await ensureUserManagementSchema();
+      const access = await loadApplicationUser(session.userId);
+      if (!access || !access.active) {
+        clearSessionCookie(req, res);
+        return res.status(403).json({ authenticated: false, error: "Compte utilisateur gelé ou supprimé" });
+      }
+      session.username = access.username;
+      session.role = access.role;
+      session.must_change_password = access.must_change_password;
+      session.permissions = access.permissions;
+    } else if (session.role !== "visitor") {
+      session.role = "admin"; // compte de récupération BaslyAli via variables Vercel
+      session.permissions = ["*"];
+    }
+    req.adminSession = session;
+    next();
+  } catch (e) {
+    console.error("Chargement droits utilisateur:", e);
+    return res.status(503).json({ authenticated: false, error: "Droits utilisateur indisponibles" });
+  }
 }
 
-app.post("/api/auth/login", (req, res) => {
-  if (!ADMIN_PASSWORD || !SESSION_SECRET) {
-    return res.status(503).json({ authenticated: false, error: "Configuration Vercel incomplete: ADMIN_PASSWORD et SESSION_SECRET sont requis." });
-  }
+app.post("/api/auth/login", async (req, res) => {
+  if (!SESSION_SECRET) return res.status(503).json({ authenticated: false, error: "SESSION_SECRET est requis." });
   const username = String((req.body && req.body.username) || "").trim();
   const password = String((req.body && req.body.password) || "");
-  if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+  if (ADMIN_PASSWORD && username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    setSessionCookie(req, res, { username, role: "admin" });
+    return res.json({ authenticated: true, user: { username, role: "admin", must_change_password: false } });
+  }
+  try {
+    await ensureUserManagementSchema();
+    let email = username;
+    if (!username.includes("@")) {
+      const lookup = await realPool.query(`SELECT email FROM app_users WHERE lower(username)=lower($1) LIMIT 1`, [username]);
+      email = String(lookup.rows[0]?.email || "");
+    }
+    if (!email) return res.status(401).json({ authenticated: false, error: "Identifiants incorrects" });
+    const supabase = createSupabaseLoginClient();
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data?.user) return res.status(401).json({ authenticated: false, error: "Identifiants incorrects" });
+    const access = await loadApplicationUser(data.user.id);
+    if (!access || !access.active) return res.status(403).json({ authenticated: false, error: "Compte gelé ou non autorisé" });
+    setSessionCookie(req, res, { username: access.username, role: access.role, userId: data.user.id });
+    return res.json({ authenticated: true, user: access });
+  } catch (e) {
+    console.error("Connexion Supabase:", e);
     return res.status(401).json({ authenticated: false, error: "Identifiants incorrects" });
   }
-  setSessionCookie(req, res, { username, role: "admin" });
-  return res.json({ authenticated: true, user: { username, role: "admin" } });
 });
 
 app.post("/api/auth/visitor", (req, res) => {
@@ -151,16 +198,28 @@ app.post("/api/auth/visitor", (req, res) => {
   });
 });
 
-app.get("/api/auth/session", (req, res) => {
-  const session = readSession(req);
-  if (!session) return res.status(401).json({ authenticated: false });
+app.get("/api/auth/session", requireAdminSession, (req, res) => {
+  const session = req.adminSession;
   return res.json({
     authenticated: true,
-    user: { username: session.username, role: session.role || "admin" },
+    user: { username: session.username, role: session.role || "operator", must_change_password: !!session.must_change_password },
     demo: session.role === "visitor",
     ephemeral: session.role === "visitor",
     expiresAt: session.exp
   });
+});
+
+app.post("/api/auth/change-password", requireAdminSession, async (req, res) => {
+  try {
+    const session = req.adminSession;
+    if (!session.userId) return res.status(400).json({ error: "Le compte de récupération utilise les variables Vercel." });
+    const password = String(req.body?.password || "");
+    if (password.length < 10) return res.status(400).json({ error: "Le mot de passe doit contenir au moins 10 caractères." });
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(session.userId, { password });
+    if (error) throw error;
+    await realPool.query(`UPDATE app_users SET must_change_password=FALSE, updated_at=now() WHERE auth_user_id=$1`, [session.userId]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/api/auth/logout", async (req, res) => {
@@ -177,12 +236,27 @@ app.post("/api/auth/logout", async (req, res) => {
 app.use((req, res, next) => {
   const isAdminHtml = /^\/admin(?:-[^/]+)?\.html$/i.test(req.path);
   const isUpload = req.path === "/uploads" || req.path.startsWith("/uploads/");
-  if (isAdminHtml || isUpload) return requireAdminSession(req, res, next);
+  if (isAdminHtml || isUpload) return requireAdminSession(req, res, () => {
+    if (req.path.toLowerCase() === '/admin-users.html' && req.adminSession?.role !== 'admin') return res.redirect('/admin.html');
+    next();
+  });
   next();
 });
 
 // All business APIs require a valid admin session. Auth endpoints above remain public.
 app.use("/api", requireAdminSession);
+app.use("/api", (req, res, next) => {
+  if (req.adminSession?.role === 'viewer' && !['GET','HEAD','OPTIONS'].includes(req.method) && req.path !== '/auth/heartbeat') {
+    return res.status(403).json({ error: 'Ce rôle est limité à la lecture.' });
+  }
+  if (req.adminSession?.role === 'operator' && req.method === 'DELETE') {
+    const isPhotoRequest = /^\/album-photos\/\d+$/.test(req.path) ||
+      /^\/lc-workflow\/lots\/\d+\/journal\/\d+\/photo$/.test(req.path) ||
+      /^\/grain-units\/\d+\/journal\/\d+\/photo$/.test(req.path);
+    if (!isPhotoRequest) return res.status(403).json({ error: 'Un opérateur ne peut pas supprimer directement cet élément.' });
+  }
+  next();
+});
 
 app.use("/backend", (req, res) => res.status(404).end());
 // Vercel sert les fichiers statiques depuis public/. En local, on garde le serveur historique.
@@ -218,6 +292,243 @@ const poolOptions = process.env.DATABASE_URL
       connectionTimeoutMillis: 10000,
     };
 let realPool = new Pool(poolOptions);
+
+let userManagementSchemaReady = false;
+async function ensureUserManagementSchema() {
+  if (userManagementSchemaReady) return;
+  await realPool.query(`
+    CREATE TABLE IF NOT EXISTS app_roles (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS app_permissions (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      description TEXT
+    );
+    CREATE TABLE IF NOT EXISTS app_role_permissions (
+      role_id BIGINT NOT NULL REFERENCES app_roles(id) ON DELETE CASCADE,
+      permission_id BIGINT NOT NULL REFERENCES app_permissions(id) ON DELETE CASCADE,
+      PRIMARY KEY(role_id, permission_id)
+    );
+    CREATE TABLE IF NOT EXISTS app_users (
+      auth_user_id UUID PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      username TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      role_id BIGINT NOT NULL REFERENCES app_roles(id),
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+      last_seen_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS photo_deletion_requests (
+      id BIGSERIAL PRIMARY KEY,
+      photo_type TEXT NOT NULL CHECK (photo_type IN ('petri','lc','grain')),
+      photo_record_id BIGINT NOT NULL,
+      photo_url TEXT NOT NULL,
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','cancelled')),
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by UUID,
+      reviewed_by_name TEXT,
+      reviewed_at TIMESTAMPTZ,
+      review_note TEXT
+    );
+    CREATE TABLE IF NOT EXISTS production_activity_log (
+      id BIGSERIAL PRIMARY KEY,
+      actor_user_id UUID,
+      actor_name TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      module TEXT NOT NULL CHECK (module IN ('petri','lc','grain')),
+      action_type TEXT NOT NULL CHECK (action_type IN ('added','modified','photo_added','delete_requested')),
+      item_id BIGINT NOT NULL,
+      item_label TEXT NOT NULL,
+      day_index INTEGER,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_photo_deletion_pending
+      ON photo_deletion_requests(photo_type, photo_record_id) WHERE status='pending';
+    CREATE INDEX IF NOT EXISTS ix_production_activity_created_at ON production_activity_log(created_at DESC);
+    CREATE INDEX IF NOT EXISTS ix_production_activity_actor_month ON production_activity_log(actor_user_id,created_at DESC);
+    CREATE INDEX IF NOT EXISTS ix_production_activity_item ON production_activity_log(module,item_id,created_at DESC);
+  `);
+  // Upgrade the earlier RBAC draft, which used app_users.user_id and fewer columns.
+  await realPool.query(`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='app_users' AND column_name='user_id')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='app_users' AND column_name='auth_user_id') THEN
+        ALTER TABLE app_users RENAME COLUMN user_id TO auth_user_id;
+      END IF;
+    END $$;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email TEXT;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS display_name TEXT;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS context_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS reason TEXT;
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS requested_by_name TEXT;
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS reviewed_by UUID;
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS reviewed_by_name TEXT;
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+    ALTER TABLE photo_deletion_requests ADD COLUMN IF NOT EXISTS review_note TEXT;
+    UPDATE photo_deletion_requests SET requested_by_name='Utilisateur' WHERE requested_by_name IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_app_users_email ON app_users(lower(email)) WHERE email IS NOT NULL;
+  `);
+  // When DATABASE_URL points at Supabase, recover emails for rows made with the old SQL.
+  await realPool.query(`
+    DO $$ BEGIN
+      IF to_regclass('auth.users') IS NOT NULL THEN
+        UPDATE app_users u SET email=a.email, updated_at=now()
+        FROM auth.users a WHERE a.id=u.auth_user_id AND (u.email IS NULL OR u.email='');
+      END IF;
+    END $$;
+  `);
+  const roles = [['admin','Administrateur'],['operator','Opérateur'],['viewer','Lecture seule']];
+  for (const [code, name] of roles) await realPool.query(`INSERT INTO app_roles(code,name) VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name`, [code, name]);
+  const permissions = [
+    ['users.manage','Gérer les utilisateurs'],['photo.upload','Ajouter des photos'],
+    ['photo.edit','Modifier des photos'],['photo.delete.request','Demander une suppression'],
+    ['photo.delete.direct','Supprimer immédiatement'],['photo.delete.approve','Approuver les suppressions']
+  ];
+  for (const [code, description] of permissions) await realPool.query(`INSERT INTO app_permissions(code,description) VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET description=EXCLUDED.description`, [code, description]);
+  await realPool.query(`
+    INSERT INTO app_role_permissions(role_id,permission_id)
+    SELECT r.id,p.id FROM app_roles r CROSS JOIN app_permissions p WHERE r.code='admin'
+    ON CONFLICT DO NOTHING;
+    INSERT INTO app_role_permissions(role_id,permission_id)
+    SELECT r.id,p.id FROM app_roles r JOIN app_permissions p ON p.code IN ('photo.upload','photo.edit','photo.delete.request') WHERE r.code='operator'
+    ON CONFLICT DO NOTHING;
+  `);
+  userManagementSchemaReady = true;
+}
+
+async function loadApplicationUser(userId) {
+  const result = await realPool.query(`
+    SELECT u.auth_user_id AS "userId", u.email, u.username, u.display_name, u.active,
+           u.must_change_password, u.last_seen_at, r.code AS role,
+           COALESCE(array_agg(p.code) FILTER (WHERE p.code IS NOT NULL), ARRAY[]::text[]) AS permissions
+    FROM app_users u JOIN app_roles r ON r.id=u.role_id
+    LEFT JOIN app_role_permissions rp ON rp.role_id=r.id
+    LEFT JOIN app_permissions p ON p.id=rp.permission_id
+    WHERE u.auth_user_id=$1
+    GROUP BY u.auth_user_id,r.code
+  `, [userId]);
+  return result.rows[0] || null;
+}
+
+function hasPermission(req, permission) {
+  const session = req.adminSession || {};
+  return session.role === 'admin' || (Array.isArray(session.permissions) && (session.permissions.includes('*') || session.permissions.includes(permission)));
+}
+
+function requirePermission(permission) {
+  return (req, res, next) => hasPermission(req, permission) ? next() : res.status(403).json({ error: 'Permission refusée' });
+}
+
+async function recordProductionActivity(req, activity) {
+  const session = req.adminSession || {};
+  if (!session.username || session.role === 'visitor') return;
+  try {
+    await ensureUserManagementSchema();
+    await realPool.query(`
+      INSERT INTO production_activity_log
+        (actor_user_id,actor_name,actor_role,module,action_type,item_id,item_label,day_index,details)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+    `, [
+      session.userId || null,
+      session.username,
+      session.role || 'operator',
+      activity.module,
+      activity.actionType,
+      Number(activity.itemId),
+      String(activity.itemLabel || activity.itemId),
+      Number.isFinite(Number(activity.dayIndex)) ? Number(activity.dayIndex) : null,
+      JSON.stringify(activity.details || {})
+    ]);
+  } catch (error) {
+    // An audit write must never make the production journal action fail.
+    console.error('Production activity audit:', error.message);
+  }
+}
+
+async function queuePhotoDeletion(req, res, photoType, photoRecordId, photoUrl, contextData = {}) {
+  if (hasPermission(req, 'photo.delete.direct')) return false;
+  if (!hasPermission(req, 'photo.delete.request')) {
+    res.status(403).json({ error: 'Vous ne pouvez pas supprimer ni demander la suppression de cette photo.' });
+    return true;
+  }
+  await ensureUserManagementSchema();
+  const result = await realPool.query(`
+    INSERT INTO photo_deletion_requests(photo_type,photo_record_id,photo_url,context_data,requested_by,requested_by_name)
+    VALUES($1,$2,$3,$4::jsonb,$5,$6)
+    ON CONFLICT (photo_type,photo_record_id) WHERE status='pending'
+    DO UPDATE SET reason=COALESCE(photo_deletion_requests.reason,EXCLUDED.reason)
+    RETURNING id,status,(xmax=0) AS created
+  `, [photoType,photoRecordId,photoUrl,JSON.stringify(contextData),req.adminSession?.userId || null,req.adminSession?.username || 'Utilisateur']);
+  const itemId = photoType === 'petri' ? contextData.petriId : photoType === 'lc' ? contextData.potId : contextData.unitId;
+  if (itemId && result.rows[0].created) await recordProductionActivity(req, {
+    module: photoType,
+    actionType: 'delete_requested',
+    itemId,
+    itemLabel: contextData.itemLabel || (photoType === 'petri' ? `Petri ID ${itemId}` : photoType === 'lc' ? `LC pot ID ${itemId}` : `Grain unité ID ${itemId}`),
+    dayIndex: contextData.dayIndex,
+    details: { request_id: result.rows[0].id, photo_record_id: Number(photoRecordId) }
+  });
+  res.status(202).json({ success: true, pending: true, request_id: result.rows[0].id, message: 'Demande envoyée à un administrateur.' });
+  return true;
+}
+
+async function performApprovedPhotoDeletion(requestRow) {
+  const type = String(requestRow.photo_type || '');
+  const id = Number(requestRow.photo_record_id);
+  const client = await realPool.connect();
+  let fileUrl = '';
+  try {
+    await client.query('BEGIN');
+    if (type === 'petri') {
+      const found = await client.query(`SELECT * FROM iso_petri_album_photos WHERE id=$1 FOR UPDATE`, [id]);
+      if (!found.rows.length) throw new Error('Photo Petri introuvable.');
+      const photo = found.rows[0]; fileUrl = String(photo.file_url || '');
+      await client.query(`DELETE FROM iso_reference_phase_images WHERE album_photo_id=$1 OR file_url=$2`, [id,fileUrl]);
+      await client.query(`UPDATE iso_petri_journal SET image_url=CASE WHEN image_url=$2 THEN '' ELSE image_url END,reference_image_url=CASE WHEN reference_image_url=$2 THEN '' ELSE reference_image_url END,is_reference=CASE WHEN image_url=$2 OR reference_image_url=$2 THEN FALSE ELSE is_reference END WHERE id=$1 OR (petri_id=$3 AND (image_url=$2 OR reference_image_url=$2))`, [photo.journal_observation_id,fileUrl,photo.petri_id]);
+      await client.query(`DELETE FROM iso_petri_album_photos WHERE id=$1`, [id]);
+    } else if (type === 'lc') {
+      const found = await client.query(`SELECT * FROM lc_pot_journal WHERE id=$1 FOR UPDATE`, [id]);
+      if (!found.rows.length) throw new Error('Photo LC introuvable.');
+      fileUrl = String(found.rows[0].photo_url || '');
+      await client.query(`DELETE FROM lc_reference_day_images WHERE journal_id=$1 OR file_url=$2`, [id,fileUrl]);
+      await client.query(`UPDATE lc_pot_journal SET reference_image_url='' WHERE reference_image_url=$1`, [fileUrl]);
+      await client.query(`UPDATE lc_pot_journal SET photo_url='',check_photo_done=FALSE WHERE id=$1`, [id]);
+    } else if (type === 'grain') {
+      const found = await client.query(`SELECT * FROM myc_grain_journal WHERE id=$1 FOR UPDATE`, [id]);
+      if (!found.rows.length) throw new Error('Photo grain introuvable.');
+      fileUrl = String(found.rows[0].photo_url || '');
+      await client.query(`DELETE FROM myc_grain_reference_images WHERE journal_id=$1 OR file_url=$2`, [id,fileUrl]);
+      await client.query(`UPDATE myc_grain_journal SET reference_image_url='' WHERE reference_image_url=$1`, [fileUrl]);
+      await client.query(`UPDATE myc_grain_journal SET photo_url='' WHERE id=$1`, [id]);
+    } else throw new Error('Type de photo inconnu.');
+    await client.query('COMMIT');
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { client.release(); }
+  if (fileUrl) {
+    let countSql = '';
+    if (type === 'petri') countSql = `SELECT (SELECT count(*) FROM iso_petri_journal WHERE image_url=$1 OR reference_image_url=$1)+(SELECT count(*) FROM iso_petri_album_photos WHERE file_url=$1)+(SELECT count(*) FROM iso_reference_phase_images WHERE file_url=$1) AS total`;
+    if (type === 'lc') countSql = `SELECT (SELECT count(*) FROM lc_pot_journal WHERE photo_url=$1 OR reference_image_url=$1)+(SELECT count(*) FROM lc_reference_day_images WHERE file_url=$1) AS total`;
+    if (type === 'grain') countSql = `SELECT (SELECT count(*) FROM myc_grain_journal WHERE photo_url=$1 OR reference_image_url=$1)+(SELECT count(*) FROM myc_grain_reference_images WHERE file_url=$1) AS total`;
+    const refs = await realPool.query(countSql,[fileUrl]);
+    if (Number(refs.rows[0]?.total || 0) === 0) await deleteStoredFile(fileUrl, SITE_DIR);
+  }
+}
 
 const demoRequestStorage = new AsyncLocalStorage();
 const demoSessions = new Map();
@@ -384,6 +695,255 @@ app.use("/api", async (req, res, next) => {
     console.error("Initialisation session visiteur:", err);
     return res.status(503).json({ error: "Mode démonstration indisponible : " + (err.message || err.code || "connexion PostgreSQL impossible") });
   }
+});
+
+// ============================================================
+// UTILISATEURS, ROLES, PRESENCE ET APPROBATIONS (Supabase Auth)
+// ============================================================
+app.post('/api/auth/heartbeat', async (req, res) => {
+  if (!req.adminSession?.userId) return res.status(204).end();
+  try {
+    await ensureUserManagementSchema();
+    await realPool.query(`UPDATE app_users SET last_seen_at=now() WHERE auth_user_id=$1`, [req.adminSession.userId]);
+    res.status(204).end();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/roles', requirePermission('users.manage'), async (_req, res) => {
+  try {
+    await ensureUserManagementSchema();
+    const result = await realPool.query(`SELECT id,code,name FROM app_roles ORDER BY CASE code WHEN 'admin' THEN 1 WHEN 'operator' THEN 2 ELSE 3 END,name`);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/users', requirePermission('users.manage'), async (_req, res) => {
+  try {
+    await ensureUserManagementSchema();
+    const result = await realPool.query(`
+      SELECT u.auth_user_id AS id,u.email,u.username,u.display_name,u.active,u.must_change_password,
+             u.last_seen_at,u.created_at,r.code AS role,r.name AS role_name,
+             (u.active AND u.last_seen_at >= now()-interval '15 minutes') AS online
+      FROM app_users u JOIN app_roles r ON r.id=u.role_id
+      ORDER BY online DESC,lower(u.username)
+    `);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const productionModuleLabels = { petri:'Boîtes de Petri',lc:'Mycélium liquide',grain:'Mycélium sur grain' };
+const productionActionLabels = { added:'Ajout du suivi',modified:'Modification du suivi',photo_added:'Photo ajoutée',delete_requested:'Suppression demandée' };
+
+async function loadProductionActivityReport(query) {
+  await ensureUserManagementSchema();
+  const month = String(query.month || '').trim();
+  const moduleName = String(query.module || '').trim();
+  const userId = String(query.user_id || '').trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { const e=new Error('Mois invalide (format YYYY-MM).');e.status=400;throw e; }
+  if (moduleName && !['petri','lc','grain'].includes(moduleName)) { const e=new Error('Module invalide.');e.status=400;throw e; }
+  const [year, monthNumber] = month.split('-').map(Number);
+  const values = [year, monthNumber];
+  const filters = [`a.created_at >= make_timestamptz($1,$2,1,0,0,0,'Europe/Berlin')`, `a.created_at < make_timestamptz($1,$2,1,0,0,0,'Europe/Berlin') + interval '1 month'`];
+  if (moduleName) { values.push(moduleName); filters.push(`a.module=$${values.length}`); }
+  if (userId) { values.push(userId); filters.push(`a.actor_user_id=$${values.length}::uuid`); }
+  const where = filters.join(' AND ');
+  const rows = await realPool.query(`
+    SELECT a.id,a.actor_user_id,a.actor_name,a.actor_role,a.module,a.action_type,a.item_id,
+           a.item_label,a.day_index,a.details,a.created_at,
+           to_char(a.created_at AT TIME ZONE 'Europe/Berlin','YYYY-MM-DD') AS activity_day
+    FROM production_activity_log a WHERE ${where}
+    ORDER BY a.created_at DESC,a.id DESC LIMIT 2000
+  `, values);
+  const summary = await realPool.query(`
+    SELECT count(*)::int AS total_actions,
+           count(DISTINCT (a.module,a.item_id))::int AS distinct_items,
+           count(DISTINCT (a.created_at AT TIME ZONE 'Europe/Berlin')::date)::int AS active_days
+    FROM production_activity_log a WHERE ${where}
+  `, values);
+  let operatorLabel = 'Tous les opérateurs';
+  if (userId) {
+    const user = await realPool.query(`SELECT username FROM app_users WHERE auth_user_id=$1::uuid`,[userId]);
+    operatorLabel = user.rows[0]?.username || userId;
+  }
+  return {
+    rows: rows.rows,
+    summary: summary.rows[0] || { total_actions:0,distinct_items:0,active_days:0 },
+    filters: { month,operator:operatorLabel,module:moduleName ? productionModuleLabels[moduleName] : 'Tous les modules' }
+  };
+}
+
+app.get('/api/admin/production-activity', requirePermission('users.manage'), async (req, res) => {
+  try { res.json(await loadProductionActivityReport(req.query)); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/production-activity/export.xlsx', requirePermission('users.manage'), async (req, res) => {
+  try {
+    const report = await loadProductionActivityReport(req.query);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Mycelium Tech Digital';
+    workbook.created = new Date();
+    const summarySheet = workbook.addWorksheet('Résumé',{views:[{showGridLines:false}]});
+    summarySheet.columns=[{width:28},{width:34}];
+    summarySheet.mergeCells('A1:B1');summarySheet.getCell('A1').value='Suivi de l’activité de production';
+    summarySheet.getCell('A1').font={bold:true,size:18,color:{argb:'FFFFFFFF'}};summarySheet.getCell('A1').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1F7A41'}};summarySheet.getCell('A1').alignment={vertical:'middle'};summarySheet.getRow(1).height=30;
+    [['Mois',report.filters.month],['Opérateur',report.filters.operator],['Module',report.filters.module],['Actions au total',report.summary.total_actions],['Éléments distincts',report.summary.distinct_items],['Jours actifs',report.summary.active_days]].forEach((r,i)=>{const row=summarySheet.getRow(i+3);row.values=r;row.getCell(1).font={bold:true,color:{argb:'FF1F7A41'}};row.getCell(2).alignment={horizontal:'left'};});
+    const sheet = workbook.addWorksheet('Activités',{views:[{state:'frozen',ySplit:1}]});
+    sheet.columns=[{header:'Date et heure',key:'date',width:22},{header:'Opérateur',key:'operator',width:22},{header:'Rôle',key:'role',width:16},{header:'Module',key:'module',width:23},{header:'Élément travaillé',key:'item',width:30},{header:'ID',key:'id',width:12},{header:'Jour cycle',key:'day',width:12},{header:'Action',key:'action',width:26}];
+    report.rows.forEach(x=>sheet.addRow({date:new Date(x.created_at),operator:x.actor_name,role:x.actor_role,module:productionModuleLabels[x.module]||x.module,item:x.item_label,id:x.item_id,day:x.day_index==null?'':x.day_index,action:productionActionLabels[x.action_type]||x.action_type}));
+    sheet.getColumn('date').numFmt='dd/mm/yyyy hh:mm';
+    sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1F7A41'}};sheet.getRow(1).alignment={vertical:'middle'};sheet.getRow(1).height=24;
+    sheet.autoFilter={from:'A1',to:'H1'};sheet.eachRow((row,rowNumber)=>{if(rowNumber>1){if(rowNumber%2===1)row.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF0F7F2'}};row.alignment={vertical:'top'};}});
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition',`attachment; filename="suivi-activite-${report.filters.month}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (e) { res.status(e.status || 500).json({ error:e.message }); }
+});
+
+app.get('/api/admin/production-activity/export.pdf', requirePermission('users.manage'), async (req, res) => {
+  try {
+    const report = await loadProductionActivityReport(req.query);
+    const doc = new PDFDocument({size:'A4',layout:'landscape',margin:34,info:{Title:'Suivi de l’activité de production',Author:'Mycelium Tech Digital'}});
+    const chunks=[];doc.on('data',c=>chunks.push(c));const completed=new Promise((resolve,reject)=>{doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.on('error',reject);});
+    let page=1;
+    const widths=[88,94,105,170,48,137],left=34,rowHeight=22;
+    const drawHeader=()=>{
+      doc.fillColor('#1f7a41').font('Helvetica-Bold').fontSize(17).text('Suivi de l’activité de production',left,28);
+      doc.fillColor('#425348').font('Helvetica').fontSize(9).text(`Mois : ${report.filters.month}   |   Opérateur : ${report.filters.operator}   |   Module : ${report.filters.module}`,left,53);
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#1f7a41').text(`Actions : ${report.summary.total_actions}     Éléments distincts : ${report.summary.distinct_items}     Jours actifs : ${report.summary.active_days}`,left,70);
+      const y=92;doc.rect(left,y,widths.reduce((a,b)=>a+b,0),20).fill('#1f7a41');
+      const headers=['Date','Opérateur','Module','Élément','Jour','Action'];let x=left;doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8);headers.forEach((h,i)=>{doc.text(h,x+4,y+6,{width:widths[i]-8,height:10});x+=widths[i];});
+      return 112;
+    };
+    const footer=()=>doc.fillColor('#667085').font('Helvetica').fontSize(8).text(`Mycelium Tech Digital - page ${page}`,left,558,{width:773,align:'right'});
+    let y=drawHeader();
+    for(const x of report.rows){
+      if(y+rowHeight>550){footer();doc.addPage();page+=1;y=drawHeader();}
+      if((Math.floor((y-112)/rowHeight)%2)===1)doc.rect(left,y,widths.reduce((a,b)=>a+b,0),rowHeight).fill('#f0f7f2');
+      const values=[new Date(x.created_at).toLocaleString('fr-FR',{timeZone:'Europe/Berlin'}),x.actor_name,productionModuleLabels[x.module]||x.module,x.item_label,x.day_index==null?'-':`J${x.day_index}`,productionActionLabels[x.action_type]||x.action_type];
+      let cellX=left;doc.fillColor('#26352b').font('Helvetica').fontSize(7.5);values.forEach((value,i)=>{doc.text(String(value),cellX+4,y+6,{width:widths[i]-8,height:rowHeight-8,ellipsis:true});cellX+=widths[i];});
+      doc.moveTo(left,y+rowHeight).lineTo(left+widths.reduce((a,b)=>a+b,0),y+rowHeight).strokeColor('#dce6df').lineWidth(.4).stroke();y+=rowHeight;
+    }
+    if(!report.rows.length)doc.fillColor('#667085').font('Helvetica').fontSize(10).text('Aucune activité pour les filtres sélectionnés.',left,y+15);
+    footer();doc.end();const buffer=await completed;
+    res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="suivi-activite-${report.filters.month}.pdf"`);res.send(buffer);
+  } catch (e) { res.status(e.status || 500).json({ error:e.message }); }
+});
+
+app.post('/api/admin/users', requirePermission('users.manage'), async (req, res) => {
+  try {
+    await ensureUserManagementSchema();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const username = String(req.body?.username || '').trim();
+    const displayName = String(req.body?.display_name || username).trim();
+    const password = String(req.body?.password || '');
+    const role = String(req.body?.role || 'operator').trim();
+    if (!email || !username || password.length < 10) return res.status(400).json({ error: 'Email, nom utilisateur et mot de passe (10 caractères minimum) requis.' });
+    const roleResult = await realPool.query(`SELECT id FROM app_roles WHERE code=$1`, [role]);
+    if (!roleResult.rows.length) return res.status(400).json({ error: 'Rôle invalide.' });
+    const { data, error } = await getSupabaseAdmin().auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { username, display_name: displayName } });
+    if (error || !data?.user) throw error || new Error('Création Supabase impossible');
+    try {
+      await realPool.query(`INSERT INTO app_users(auth_user_id,email,username,display_name,role_id,active,must_change_password) VALUES($1,$2,$3,$4,$5,TRUE,TRUE) ON CONFLICT(auth_user_id) DO UPDATE SET email=EXCLUDED.email,username=EXCLUDED.username,display_name=EXCLUDED.display_name,role_id=EXCLUDED.role_id,active=TRUE,must_change_password=TRUE,updated_at=now()`, [data.user.id,email,username,displayName,roleResult.rows[0].id]);
+    } catch (dbError) {
+      await getSupabaseAdmin().auth.admin.deleteUser(data.user.id).catch(() => {});
+      throw dbError;
+    }
+    res.status(201).json({ success: true, id: data.user.id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/admin/users/:id', requirePermission('users.manage'), async (req, res) => {
+  try {
+    await ensureUserManagementSchema();
+    const userId = String(req.params.id || '');
+    const current = await loadApplicationUser(userId);
+    if (!current) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    const email = String(req.body?.email || current.email).trim().toLowerCase();
+    const username = String(req.body?.username || current.username).trim();
+    const displayName = String(req.body?.display_name ?? current.display_name ?? username).trim();
+    const role = String(req.body?.role || current.role).trim();
+    if (userId === req.adminSession?.userId && role !== 'admin') return res.status(400).json({ error: 'Vous ne pouvez pas retirer votre propre rôle administrateur.' });
+    const rr = await realPool.query(`SELECT id FROM app_roles WHERE code=$1`, [role]);
+    if (!rr.rows.length) return res.status(400).json({ error: 'Rôle invalide.' });
+    if (email !== current.email) {
+      const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { email, email_confirm: true });
+      if (error) throw error;
+    }
+    await realPool.query(`UPDATE app_users SET email=$2,username=$3,display_name=$4,role_id=$5,updated_at=now() WHERE auth_user_id=$1`, [userId,email,username,displayName,rr.rows[0].id]);
+    res.json({ success: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/admin/users/:id/freeze', requirePermission('users.manage'), async (req, res) => {
+  try {
+    const userId = String(req.params.id || '');
+    if (userId === req.adminSession?.userId) return res.status(400).json({ error: 'Vous ne pouvez pas geler votre propre compte.' });
+    await ensureUserManagementSchema();
+    const active = req.body?.active === true;
+    const result = await realPool.query(`UPDATE app_users SET active=$2,updated_at=now() WHERE auth_user_id=$1 RETURNING auth_user_id`, [userId,active]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    res.json({ success: true, active });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/users/:id/force-password', requirePermission('users.manage'), async (req, res) => {
+  try {
+    const password = String(req.body?.temporary_password || '');
+    if (password.length < 10) return res.status(400).json({ error: 'Le mot de passe temporaire doit contenir au moins 10 caractères.' });
+    const userId = String(req.params.id || '');
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { password });
+    if (error) throw error;
+    await realPool.query(`UPDATE app_users SET must_change_password=TRUE,updated_at=now() WHERE auth_user_id=$1`, [userId]);
+    res.json({ success: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/admin/users/:id', requirePermission('users.manage'), async (req, res) => {
+  try {
+    const userId = String(req.params.id || '');
+    if (userId === req.adminSession?.userId) return res.status(400).json({ error: 'Vous ne pouvez pas supprimer votre propre compte.' });
+    const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId);
+    if (error) throw error;
+    await realPool.query(`DELETE FROM app_users WHERE auth_user_id=$1`, [userId]);
+    res.json({ success: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/admin/photo-deletion-requests', requirePermission('photo.delete.approve'), async (_req, res) => {
+  try {
+    await ensureUserManagementSchema();
+    const result = await realPool.query(`SELECT * FROM photo_deletion_requests ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END,requested_at DESC LIMIT 300`);
+    res.json(result.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/photo-deletion-requests/:id/reject', requirePermission('photo.delete.approve'), async (req, res) => {
+  try {
+    const result = await realPool.query(`UPDATE photo_deletion_requests SET status='rejected',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),review_note=$4 WHERE id=$1 AND status='pending' RETURNING *`, [Number(req.params.id),req.adminSession?.userId || null,req.adminSession?.username || 'Admin',String(req.body?.note || '')]);
+    if (!result.rows.length) return res.status(409).json({ error: 'Cette demande a déjà été traitée.' });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/photo-deletion-requests/:id/approve', requirePermission('photo.delete.approve'), async (req, res) => {
+  const client = await realPool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(`SELECT * FROM photo_deletion_requests WHERE id=$1 FOR UPDATE`, [Number(req.params.id)]);
+    if (!locked.rows.length || locked.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Cette demande a déjà été traitée.' });
+    }
+    await performApprovedPhotoDeletion(locked.rows[0]);
+    await client.query(`UPDATE photo_deletion_requests SET status='approved',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),review_note=$4 WHERE id=$1 AND status='pending'`, [Number(req.params.id),req.adminSession?.userId || null,req.adminSession?.username || 'Admin',String(req.body?.note || '')]);
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 
@@ -2880,11 +3440,12 @@ app.post('/api/lc-workflow/lots/:id/journal', async (req, res) => {
     const dayIndex = Number(b.day_index);
     if (!lotId || !potId || !Number.isFinite(dayIndex)) return res.status(400).json({ error: 'lot, pot et day_index obligatoires' });
     await client.query('BEGIN');
-    let pcheck = await client.query('SELECT id FROM lc_pots WHERE id=$1 AND lc_lot_id=$2 AND deleted_at IS NULL', [potId, lotId]);
+    let pcheck = await client.query('SELECT id,pot_number,code FROM lc_pots WHERE id=$1 AND lc_lot_id=$2 AND deleted_at IS NULL', [potId, lotId]);
     if (!pcheck.rows.length) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Pot LC introuvable pour ce lot' });
     }
+    const existingJournal = await client.query('SELECT id FROM lc_pot_journal WHERE lc_pot_id=$1 AND day_index=$2 LIMIT 1', [potId,dayIndex]);
     const photo = String(b.photo_url || '').trim();
     let refUrl = String(b.reference_image_url || '').trim();
     if (!refUrl) {
@@ -2963,6 +3524,11 @@ app.post('/api/lc-workflow/lots/:id/journal', async (req, res) => {
     }
 
     await client.query('COMMIT');
+    await recordProductionActivity(req, {
+      module: 'lc', actionType: existingJournal.rows.length ? 'modified' : 'added', itemId: potId,
+      itemLabel: pcheck.rows[0].code || `LC pot ${pcheck.rows[0].pot_number || potId}`, dayIndex,
+      details: { lot_id: lotId, journal_id: up.rows[0].id, has_photo: Boolean(photo) }
+    });
     res.status(201).json(up.rows[0]);
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
@@ -2986,7 +3552,7 @@ app.delete('/api/lc-workflow/lots/:lotId/journal/:journalId/photo', async (req, 
 
     await client.query('BEGIN');
     const found = await client.query(
-      `SELECT id, photo_url FROM lc_pot_journal WHERE id=$1 AND lc_lot_id=$2 FOR UPDATE`,
+      `SELECT id,lc_pot_id,day_index,photo_url FROM lc_pot_journal WHERE id=$1 AND lc_lot_id=$2 FOR UPDATE`,
       [journalId, lotId]
     );
     if (!found.rows.length) {
@@ -2997,6 +3563,10 @@ app.delete('/api/lc-workflow/lots/:lotId/journal/:journalId/photo', async (req, 
     if (!fileUrl) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Aucune photo à supprimer pour cette entrée.' });
+    }
+    if (!hasPermission(req, 'photo.delete.direct')) {
+      await client.query('ROLLBACK');
+      if (await queuePhotoDeletion(req,res,'lc',journalId,fileUrl,{ lotId,journalId,potId:found.rows[0].lc_pot_id,dayIndex:found.rows[0].day_index })) return;
     }
 
     await client.query(`DELETE FROM lc_reference_day_images WHERE journal_id=$1 OR file_url=$2`, [journalId, fileUrl]);
@@ -4074,6 +4644,7 @@ app.post('/api/grain-units/:id/journal', async (req, res) => {
       return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
     }
     const unit = unitQ.rows[0];
+    const existingJournal = await client.query(`SELECT id FROM myc_grain_journal WHERE grain_unit_id=$1 AND day_index=$2 LIMIT 1`, [unitId,dayIndex]);
     let refUrl = String(b.reference_image_url || '').trim();
     if (!refUrl) {
       const rr = await client.query(`SELECT file_url FROM myc_grain_reference_images WHERE batch_id=$1 AND day_index=$2`, [unit.batch_id, dayIndex]);
@@ -4152,6 +4723,11 @@ app.post('/api/grain-units/:id/journal', async (req, res) => {
     }
 
     await client.query('COMMIT');
+    await recordProductionActivity(req, {
+      module: 'grain', actionType: existingJournal.rows.length ? 'modified' : 'added', itemId: unitId,
+      itemLabel: unit.code || `Grain unité ID ${unitId}`, dayIndex,
+      details: { batch_id: unit.batch_id, journal_id: saved.rows[0].id, has_photo: Boolean(String(b.photo_url || '').trim()) }
+    });
     res.status(201).json(saved.rows[0]);
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
@@ -4174,7 +4750,7 @@ app.delete('/api/grain-units/:unitId/journal/:journalId/photo', async (req, res)
 
     await client.query('BEGIN');
     const found = await client.query(
-      `SELECT id, photo_url FROM myc_grain_journal WHERE id=$1 AND grain_unit_id=$2 FOR UPDATE`,
+      `SELECT id,grain_unit_id,day_index,photo_url FROM myc_grain_journal WHERE id=$1 AND grain_unit_id=$2 FOR UPDATE`,
       [journalId, unitId]
     );
     if (!found.rows.length) {
@@ -4185,6 +4761,10 @@ app.delete('/api/grain-units/:unitId/journal/:journalId/photo', async (req, res)
     if (!fileUrl) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Aucune photo à supprimer pour cette entrée.' });
+    }
+    if (!hasPermission(req, 'photo.delete.direct')) {
+      await client.query('ROLLBACK');
+      if (await queuePhotoDeletion(req,res,'grain',journalId,fileUrl,{ unitId,journalId,dayIndex:found.rows[0].day_index })) return;
     }
 
     await client.query(`DELETE FROM myc_grain_reference_images WHERE journal_id=$1 OR file_url=$2`, [journalId, fileUrl]);
@@ -5187,7 +5767,7 @@ app.post("/api/journal/observation", async (req, res) => {
       (b.q6 ? 3 : 0);
 
     // récupérer j0 du petri pour calculer journal_date
-    const petriRes = await pool.query(`SELECT id, isolement_id, j0 FROM iso_petris WHERE id=$1 LIMIT 1`, [petriId]);
+    const petriRes = await pool.query(`SELECT id, isolement_id, phase, j0 FROM iso_petris WHERE id=$1 LIMIT 1`, [petriId]);
     if (!petriRes.rows.length) return res.status(404).json({ success: false, error: "Petri introuvable" });
 
     const j0 = parseYMD(petriRes.rows[0].j0);
@@ -5196,6 +5776,7 @@ app.post("/api/journal/observation", async (req, res) => {
     const d = new Date(j0);
     d.setDate(d.getDate() + day);
     const journal_date = ymd(d);
+    const existingJournal = await pool.query(`SELECT id FROM iso_petri_journal WHERE petri_id=$1 AND journal_date=$2 LIMIT 1`, [petriId,journal_date]);
 
     let manipulation_type = String(b.manipulation_type || b.type_manipulation || "Observation quotidienne").trim();
     let is_pickable = !!(b.is_pickable || b.mycelium_pickable);
@@ -5247,6 +5828,11 @@ app.post("/api/journal/observation", async (req, res) => {
       ]
     );
 
+    await recordProductionActivity(req, {
+      module: 'petri', actionType: existingJournal.rows.length ? 'modified' : 'added', itemId: petriId,
+      itemLabel: `P${Number(petriRes.rows[0].phase || parsed.phase || 0)} ID ${petriId}`, dayIndex: day,
+      details: { isolement_id: petriRes.rows[0].isolement_id, journal_id: r.rows[0].id }
+    });
     return res.json({ success: true, data: { id_observation: r.rows[0].id } });
   } catch (e) {
     console.error("POST /api/journal/observation", e);
@@ -5297,6 +5883,10 @@ app.delete("/api/album-photos/:id", async (req, res) => {
     }
     const photo = found.rows[0];
     fileUrl = String(photo.file_url || '').trim();
+    if (!hasPermission(req, 'photo.delete.direct')) {
+      await client.query('ROLLBACK');
+      if (await queuePhotoDeletion(req,res,'petri',photoId,fileUrl,{ petriId:photo.petri_id,albumPhotoId:photoId,dayIndex:photo.day_index,itemLabel:`Petri ID ${photo.petri_id}` })) return;
+    }
 
     await client.query(`DELETE FROM iso_reference_phase_images WHERE album_photo_id=$1 OR file_url=$2`, [photoId, fileUrl]);
     await client.query(
@@ -5480,6 +6070,12 @@ app.post("/api/journal/image", upload.single("photo"), async (req, res) => {
        WHERE id=$2`,
       [file_url, id_observation, groupReferenceUrl, becomesReference]
     );
+
+    await recordProductionActivity(req, {
+      module: 'petri', actionType: 'photo_added', itemId: petriId,
+      itemLabel: `P${phase} ID ${petriId}`, dayIndex,
+      details: { isolement_id: isolementId, journal_id: id_observation, album_photo_id: albumPhoto.id }
+    });
 
     res.json({
       success: true,

@@ -1746,6 +1746,7 @@ window.deleteLcSummaryPhoto=async function(lotId,potId,journalId){
     const j=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(j.error||'Suppression impossible');
     await resumeLcPotColumn(lotId,potId);
+    if(j.pending)return alert('⏳ Demande envoyée à un administrateur. La photo reste visible jusqu’à son approbation.');
     if(j.storage_warning)alert('Photo retirée, mais le fichier distant n’a pas pu être supprimé : '+j.storage_warning);
   }catch(e){alert('❌ '+(e.message||e));}
 };
