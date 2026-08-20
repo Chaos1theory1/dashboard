@@ -348,6 +348,25 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     if (currentPage() !== "login-admin.html") {
+      if (!document.querySelector('link[href*="admin-dashboard-shell.css"]')) {
+        const shellCss = document.createElement("link");
+        shellCss.rel = "stylesheet";
+        shellCss.href = "css/admin-dashboard-shell.css?v=20260820-6";
+        document.head.appendChild(shellCss);
+      }
+      const loadShell = () => {
+        if (document.querySelector('script[src*="admin-dashboard-shell.js"]')) return;
+        const shellScript = document.createElement("script");
+        shellScript.src = "js/admin-dashboard-shell.js?v=20260820-6";
+        document.body.appendChild(shellScript);
+      };
+      if (window.lucide) loadShell();
+      else {
+        const lucideScript = document.createElement("script");
+        lucideScript.src = "https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js";
+        lucideScript.onload = loadShell;
+        document.head.appendChild(lucideScript);
+      }
       renderSessionChrome(readUiAuth());
       verifyServerSession().then(startHeartbeat);
     }
