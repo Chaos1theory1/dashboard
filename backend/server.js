@@ -6571,12 +6571,16 @@ app.get("/api/scan/resolve", async (req, res) => {
 
 // ============================================================
 // HYBRID LAB IMAGE PIPELINE
-// Browser -> signed Supabase temporary upload -> Edge AVIF conversion.
-// The binary image never passes through this Vercel/Express function.
+// Browser -> automatic resize/compression -> signed Supabase temporary upload
+// -> Vercel Node + Sharp AVIF conversion.
+// The browser sends the binary directly to Supabase; it never passes through
+// the Vercel request body.
 // ============================================================
 const MEDIA_KINDS = new Set(["petri", "lc", "grain"]);
 const MEDIA_INPUT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".avif", ".heic", ".heif"]);
-const MEDIA_MAX_TEMP_BYTES = 5 * 1024 * 1024;
+// Emergency safeguard only. The browser normally compresses phone photos to
+// roughly <= 4 MB before requesting the signed upload.
+const MEDIA_MAX_TEMP_BYTES = 40 * 1024 * 1024;
 
 function validateMediaKind(value) {
   const kind = String(value || "").trim().toLowerCase();
@@ -6608,7 +6612,7 @@ app.post("/api/media/sign-upload", async (req, res) => {
     if (size && (!Number.isFinite(size) || size < 1 || size > MEDIA_MAX_TEMP_BYTES)) {
       return res.status(413).json({
         success: false,
-        error: "Image temporaire trop volumineuse. Maximum 5 MB apres preparation navigateur."
+        error: "Image temporaire exceptionnellement volumineuse apres preparation navigateur (maximum de securite: 40 MB)."
       });
     }
 
@@ -6625,7 +6629,8 @@ app.post("/api/media/sign-upload", async (req, res) => {
       success: true,
       bucket: "incoming-media",
       path: tempPath,
-      token: data.token
+      token: data.token,
+      signedUrl: data.signedUrl || null
     });
   } catch (e) {
     console.error("POST /api/media/sign-upload", e);
@@ -6637,6 +6642,40 @@ app.post("/api/media/process", async (req, res) => {
   try {
     const kind = validateMediaKind(req.body && req.body.kind);
     const sourcePath = validateTemporaryMediaPath(kind, req.body && req.body.sourcePath);
+    const entityId = Number(req.body && req.body.entityId);
+
+    if (!Number.isInteger(entityId) || entityId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Identifiant de la photo manquant ou invalide."
+      });
+    }
+
+    // Keep permanent filenames traceable to the Petri / LC pot / Grain unit.
+    let entityCheck;
+    if (kind === "petri") {
+      entityCheck = await pool.query(
+        `SELECT id FROM iso_petris WHERE id=$1 LIMIT 1`,
+        [entityId]
+      );
+    } else if (kind === "lc") {
+      entityCheck = await pool.query(
+        `SELECT id FROM lc_pots WHERE id=$1 AND deleted_at IS NULL LIMIT 1`,
+        [entityId]
+      );
+    } else {
+      entityCheck = await pool.query(
+        `SELECT id FROM myc_grain_units WHERE id=$1 LIMIT 1`,
+        [entityId]
+      );
+    }
+
+    if (!entityCheck.rows.length) {
+      return res.status(404).json({
+        success: false,
+        error: "Élément associé à la photo introuvable."
+      });
+    }
 
     // Final AVIF profiles. The browser already performs a first resize/compression,
     // and Sharp applies a second safety resize before AVIF encoding.
@@ -6715,13 +6754,17 @@ app.post("/api/media/process", async (req, res) => {
       `${Math.round(avifBuffer.length / 1024)} KB`
     );
 
-    // 3) Generate a unique permanent .avif filename.
-    const timestamp = new Date()
+    // 3) Generate a traceable permanent filename:
+    // ISOIMG-YYYYMMDD-HHMMSS-<petriId>.avif
+    // LCIMG-YYYYMMDD-HHMMSS-<potId>.avif
+    // GRAINIMG-YYYYMMDD-HHMMSS-<unitId>.avif
+    const compactTimestamp = new Date()
       .toISOString()
       .replace(/\D/g, "")
       .slice(0, 14);
-    const random = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
-    const finalName = `${profile.prefix}-${timestamp}-${random}.avif`;
+    const datePart = compactTimestamp.slice(0, 8);
+    const timePart = compactTimestamp.slice(8, 14);
+    const finalName = `${profile.prefix}-${datePart}-${timePart}-${entityId}.avif`;
 
     // 4) Upload the permanent AVIF to the existing final bucket.
     const { error: uploadError } = await supabase.storage

@@ -697,7 +697,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script
-  src="/js/media-avif-upload.js?v=20260816-3"
+  src="/js/media-avif-upload.js?v=20260820-4"
   onload="console.log('✅ Fichier AVIF téléchargé')"
   onerror="console.error('❌ Fichier AVIF impossible à télécharger')">
 </script>
@@ -1375,9 +1375,15 @@ const converted =
   await window.uploadLabImage(
             photoInput.files[0],
             'petri',
-            status => {
+            (status, percent, detail) => {
               const preview = document.getElementById(`preview-${day}`);
-              if (preview) preview.innerHTML = `<div style="padding:20px;color:#666;font-weight:700;">${status}</div>`;
+              if (!preview) return;
+              const message = detail && detail.message ? detail.message : status;
+              if (typeof window.renderLabUploadProgress === 'function') {
+                window.renderLabUploadProgress(preview, message, percent);
+              } else {
+                preview.innerHTML = `<div style="padding:20px;color:#666;font-weight:700;">${status}</div>`;
+              }
             },
             {
               entityId: Number(currentPetriId)

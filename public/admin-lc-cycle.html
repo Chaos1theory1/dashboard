@@ -1142,8 +1142,17 @@ async function uploadPhoto(day){
     return old?.photo_url || '';
   }
   if(typeof window.uploadLabImage!=='function')throw new Error('Module AVIF non charge');
-  const result=await window.uploadLabImage(file,'lc',status=>{
+  const result=await window.uploadLabImage(file,'lc',(status,percent,detail)=>{
     console.log('[LC AVIF]',status);
+    const preview=document.getElementById(`preview-${day}`);
+    if(preview){
+      const message=detail&&detail.message?detail.message:status;
+      if(typeof window.renderLabUploadProgress==='function'){
+        window.renderLabUploadProgress(preview,message,percent);
+      }else{
+        preview.innerHTML=`<div style="padding:20px;color:#666;font-weight:700;">${status}</div>`;
+      }
+    }
   },{
     entityId:Number(selectedPot.id)
   });
@@ -1787,7 +1796,7 @@ setInterval(()=>{
  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script
-  src="/js/media-avif-upload.js?v=20260816-3"
+  src="/js/media-avif-upload.js?v=20260820-4"
   onload="console.log('✅ Fichier AVIF téléchargé')"
   onerror="console.error('❌ Fichier AVIF impossible à télécharger')">
 </script>
