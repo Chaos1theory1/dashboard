@@ -758,6 +758,7 @@ const productionActionLabels = { added:'Ajout du suivi',modified:'Modification d
 app.get('/api/dashboard/summary', async (req, res) => {
   try {
     await ensureUserManagementSchema();
+    await ensurePetriDeletionWorkflowSchema();
     await ensureIsoPetrisStorageSchema();
     await ensureLcPotWorkflowSchema();
     await ensureGrainWorkflowSchema();
@@ -915,7 +916,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
           `)
         : Promise.resolve({ rows: [{ active: 0, online: 0, total: 0 }] }),
       isAdmin
-        ? realPool.query(`SELECT count(*)::int AS total FROM photo_deletion_requests WHERE status='pending'`)
+        ? realPool.query(`SELECT ((SELECT count(*) FROM photo_deletion_requests WHERE status='pending') + (SELECT count(*) FROM petri_deletion_requests WHERE status='pending'))::int AS total`)
         : Promise.resolve({ rows: [{ total: 0 }] })
     ]);
 
@@ -1278,6 +1279,269 @@ app.delete('/api/admin/users/:id', requirePermission('users.manage'), async (req
     await realPool.query(`DELETE FROM app_users WHERE auth_user_id=$1`, [userId]);
     res.json({ success: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+const PETRI_DELETE_BUCKET = 'petrie_issue_delete';
+let petriDeletionSchemaReady = false;
+let petriDeletionBucketReady = false;
+
+async function ensurePetriDeletionWorkflowSchema() {
+  if (petriDeletionSchemaReady) return;
+  await realPool.query(`
+    CREATE TABLE IF NOT EXISTS petri_deletion_requests (
+      id BIGSERIAL PRIMARY KEY,
+      petri_id BIGINT NOT NULL,
+      isolement_id BIGINT,
+      phase INTEGER,
+      petri_code TEXT,
+      reason TEXT NOT NULL,
+      evidence_path TEXT,
+      evidence_bucket TEXT NOT NULL DEFAULT 'petrie_issue_delete',
+      evidence_mime_type TEXT,
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','cancelled')),
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by UUID,
+      reviewed_by_name TEXT,
+      reviewed_at TIMESTAMPTZ,
+      review_note TEXT
+    );
+    ALTER TABLE petri_deletion_requests ADD COLUMN IF NOT EXISTS evidence_bucket TEXT NOT NULL DEFAULT 'petrie_issue_delete';
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_petri_deletion_pending
+      ON petri_deletion_requests(petri_id) WHERE status='pending';
+    CREATE INDEX IF NOT EXISTS ix_petri_deletion_requests_requested_at
+      ON petri_deletion_requests(requested_at DESC);
+
+    CREATE TABLE IF NOT EXISTS petri_deletion_history (
+      id BIGSERIAL PRIMARY KEY,
+      request_id BIGINT,
+      petri_id BIGINT NOT NULL,
+      isolement_id BIGINT,
+      phase INTEGER,
+      petri_code TEXT,
+      reason TEXT NOT NULL,
+      evidence_path TEXT,
+      evidence_bucket TEXT NOT NULL DEFAULT 'petrie_issue_delete',
+      evidence_mime_type TEXT,
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      requested_at TIMESTAMPTZ,
+      approved_by UUID,
+      approved_by_name TEXT,
+      approved_at TIMESTAMPTZ,
+      deletion_mode TEXT NOT NULL CHECK (deletion_mode IN ('admin_direct','operator_approved')),
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE petri_deletion_history ADD COLUMN IF NOT EXISTS evidence_bucket TEXT NOT NULL DEFAULT 'petrie_issue_delete';
+    CREATE INDEX IF NOT EXISTS ix_petri_deletion_history_deleted_at
+      ON petri_deletion_history(deleted_at DESC);
+    CREATE INDEX IF NOT EXISTS ix_petri_deletion_history_petri_id
+      ON petri_deletion_history(petri_id, deleted_at DESC);
+  `);
+  petriDeletionSchemaReady = true;
+}
+
+async function ensurePetriDeletionBucket() {
+  if (petriDeletionBucketReady) return;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.getBucket(PETRI_DELETE_BUCKET);
+  if (!error && data) {
+    petriDeletionBucketReady = true;
+    return;
+  }
+  const { error: createError } = await supabase.storage.createBucket(PETRI_DELETE_BUCKET, {
+    public: false,
+    fileSizeLimit: 4 * 1024 * 1024,
+    allowedMimeTypes: ['image/jpeg','image/png','image/webp','image/avif','image/heic','image/heif']
+  });
+  if (createError && !/already exists|duplicate/i.test(String(createError.message || ''))) {
+    throw new Error(`Creation bucket ${PETRI_DELETE_BUCKET} impossible: ${createError.message}`);
+  }
+  petriDeletionBucketReady = true;
+}
+
+function petriDeletionCode(petri) {
+  return String(petri?.code_boite || petri?.code || petri?.label_code || `ISO-${petri?.isolement_id || 'X'}-P${petri?.id || 'X'}`);
+}
+
+async function uploadPetriDeletionEvidence(file, petriId) {
+  if (!file) return null;
+  await ensurePetriDeletionBucket();
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const token = crypto.randomBytes(5).toString('hex');
+  const objectPath = `petri/${Number(petriId)}/PETRIEDELETE-${stamp}-P${Number(petriId)}-${token}.avif`;
+  let buffer;
+  try {
+    buffer = await sharp(file.buffer).rotate().resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).avif({ quality: 58, effort: 4 }).toBuffer();
+  } catch (conversionError) {
+    throw new Error(`Image justificative illisible: ${conversionError.message}`);
+  }
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.storage.from(PETRI_DELETE_BUCKET).upload(objectPath, buffer, {
+    contentType: 'image/avif',
+    cacheControl: '3600',
+    upsert: false
+  });
+  if (error) throw new Error(`Upload image justificative impossible: ${error.message}`);
+  return { path: objectPath, mimeType: 'image/avif' };
+}
+
+async function removePetriDeletionEvidence(objectPath) {
+  const safePath = String(objectPath || '').trim();
+  if (!safePath) return;
+  try {
+    await ensurePetriDeletionBucket();
+    const { error } = await getSupabaseAdmin().storage.from(PETRI_DELETE_BUCKET).remove([safePath]);
+    if (error) throw error;
+  } catch (e) {
+    console.error('Suppression image justificative Petri:', e.message || e);
+  }
+}
+
+async function signedPetriDeletionEvidenceUrl(objectPath) {
+  const safePath = String(objectPath || '').trim();
+  if (!safePath) return null;
+  try {
+    await ensurePetriDeletionBucket();
+    const { data, error } = await getSupabaseAdmin().storage.from(PETRI_DELETE_BUCKET).createSignedUrl(safePath, 60 * 60);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  } catch (e) {
+    console.error('URL signee image justificative Petri:', e.message || e);
+    return null;
+  }
+}
+
+const petriDeletionEvidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: imageFileFilter
+});
+
+async function lockPetriForDeletion(client, petriId) {
+  const found = await client.query(`
+    SELECT id, isolement_id, parent_id, phase, j0, status, gelose_id, created_at, deleted_at, deleted_reason
+    FROM iso_petris WHERE id=$1 FOR UPDATE
+  `, [Number(petriId)]);
+  if (!found.rows.length) throw new Error('Boite de Petri introuvable.');
+  if (found.rows[0].deleted_at) throw new Error('Cette boite de Petri est deja supprimee.');
+  return found.rows[0];
+}
+
+async function executePetriSoftDeletion(client, petri, reason) {
+  const result = await client.query(`
+    UPDATE iso_petris
+       SET status='SUPPRIME', deleted_at=now(), deleted_reason=$2
+     WHERE id=$1 AND deleted_at IS NULL
+     RETURNING id, isolement_id, phase, j0, status, gelose_id, deleted_at, deleted_reason
+  `, [Number(petri.id), String(reason)]);
+  if (!result.rows.length) throw new Error('Boite introuvable ou deja supprimee.');
+  return result.rows[0];
+}
+
+async function insertPetriDeletionHistory(client, data) {
+  await client.query(`
+    INSERT INTO petri_deletion_history
+      (request_id,petri_id,isolement_id,phase,petri_code,reason,evidence_path,evidence_bucket,evidence_mime_type,
+       requested_by,requested_by_name,requested_by_role,requested_at,
+       approved_by,approved_by_name,approved_at,deletion_mode,context_data)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)
+  `, [
+    data.requestId || null, Number(data.petri.id), data.petri.isolement_id || null, data.petri.phase || null,
+    data.petriCode || petriDeletionCode(data.petri), data.reason, data.evidencePath || null, PETRI_DELETE_BUCKET, data.evidenceMimeType || null,
+    data.requestedBy || null, data.requestedByName || 'Utilisateur', data.requestedByRole || 'operator', data.requestedAt || new Date(),
+    data.approvedBy || null, data.approvedByName || null, data.approvedAt || new Date(), data.deletionMode,
+    JSON.stringify(data.contextData || {})
+  ]);
+}
+
+app.get('/api/admin/petri-deletion-requests', requirePermission('photo.delete.approve'), async (_req, res) => {
+  try {
+    await ensurePetriDeletionWorkflowSchema();
+    const result = await realPool.query(`
+      SELECT * FROM petri_deletion_requests
+      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, requested_at DESC
+      LIMIT 300
+    `);
+    const rows = await Promise.all(result.rows.map(async (row) => ({
+      ...row,
+      evidence_url: row.evidence_path ? await signedPetriDeletionEvidenceUrl(row.evidence_path) : null
+    })));
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/petri-deletion-requests/:id/reject', requirePermission('photo.delete.approve'), async (req, res) => {
+  try {
+    await ensurePetriDeletionWorkflowSchema();
+    const result = await realPool.query(`
+      UPDATE petri_deletion_requests
+         SET status='rejected', reviewed_by=$2, reviewed_by_name=$3, reviewed_at=now(), review_note=$4
+       WHERE id=$1 AND status='pending'
+       RETURNING *
+    `, [Number(req.params.id), req.adminSession?.userId || null, req.adminSession?.username || 'Admin', String(req.body?.note || '')]);
+    if (!result.rows.length) return res.status(409).json({ error: 'Cette demande a deja ete traitee.' });
+    await recordProductionActivity(req, {
+      module: 'petri', actionType: 'delete_rejected', itemId: result.rows[0].petri_id,
+      itemLabel: result.rows[0].petri_code || `Petri ID ${result.rows[0].petri_id}`,
+      details: { target: 'petri_record', request_id: result.rows[0].id, reason: result.rows[0].reason }
+    });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/petri-deletion-requests/:id/approve', requirePermission('photo.delete.approve'), async (req, res) => {
+  const client = await realPool.connect();
+  try {
+    await ensurePetriDeletionWorkflowSchema();
+    await client.query('BEGIN');
+    const locked = await client.query(`SELECT * FROM petri_deletion_requests WHERE id=$1 FOR UPDATE`, [Number(req.params.id)]);
+    if (!locked.rows.length || locked.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Cette demande a deja ete traitee.' });
+    }
+    const requestRow = locked.rows[0];
+    const petri = await lockPetriForDeletion(client, requestRow.petri_id);
+    const deleted = await executePetriSoftDeletion(client, petri, requestRow.reason);
+    const approvedAt = new Date();
+    await insertPetriDeletionHistory(client, {
+      requestId: requestRow.id,
+      petri,
+      petriCode: requestRow.petri_code,
+      reason: requestRow.reason,
+      evidencePath: requestRow.evidence_path,
+      evidenceMimeType: requestRow.evidence_mime_type,
+      requestedBy: requestRow.requested_by,
+      requestedByName: requestRow.requested_by_name,
+      requestedByRole: requestRow.requested_by_role,
+      requestedAt: requestRow.requested_at,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: req.adminSession?.username || 'Admin',
+      approvedAt,
+      deletionMode: 'operator_approved',
+      contextData: requestRow.context_data || {}
+    });
+    await client.query(`
+      UPDATE petri_deletion_requests
+         SET status='approved', reviewed_by=$2, reviewed_by_name=$3, reviewed_at=$4, review_note=$5
+       WHERE id=$1
+    `, [requestRow.id, req.adminSession?.userId || null, req.adminSession?.username || 'Admin', approvedAt, String(req.body?.note || '')]);
+    await client.query('COMMIT');
+    await recordProductionActivity(req, {
+      module: 'petri', actionType: 'delete_approved', itemId: petri.id,
+      itemLabel: requestRow.petri_code || `Petri ID ${petri.id}`,
+      details: { target: 'petri_record', request_id: requestRow.id, reason: requestRow.reason }
+    });
+    res.json({ success: true, deleted });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 app.get('/api/admin/photo-deletion-requests', requirePermission('photo.delete.approve'), async (_req, res) => {
@@ -5791,26 +6055,146 @@ app.put("/api/petris/:id/stock-frigo", handleStockFrigo);
 app.post("/api/petris/:id/conservation-frigorifique", handleStockFrigo);
 app.put("/api/petris/:id/conservation-frigorifique", handleStockFrigo);
 
-// DELETE /api/petris/:id
-// Corbeille logique : la boite est cachee mais reste tracable.
-app.delete("/api/petris/:id", async (req, res) => {
+// POST /api/petris/:id/deletion-request
+// Operateur: demande d'approbation. Admin: suppression immediate.
+// Dans tous les cas, le motif saisi est obligatoire; la photo justificative est facultative.
+app.post("/api/petris/:id/deletion-request", petriDeletionEvidenceUpload.single('evidence_photo'), async (req, res) => {
+  let uploadedEvidence = null;
   try {
+    await ensurePetriDeletionWorkflowSchema();
+    const role = String(req.adminSession?.role || '');
+    if (!['admin','operator'].includes(role)) return res.status(403).json({ error: 'Ce role ne peut pas demander la suppression d’une boite de Petri.' });
+
     const petriId = Number(req.params.id);
-    if (!petriId) return res.status(400).json({ success: false, error: "id petri invalide" });
-    let reason = String(req.body?.reason || "Suppression operateur").trim();
-    const up = await pool.query(
-      `UPDATE iso_petris
-       SET status='SUPPRIME', deleted_at=now(), deleted_reason=$2
-       WHERE id=$1 AND deleted_at IS NULL
-       RETURNING id, isolement_id, phase, j0, status, deleted_at, deleted_reason`,
-      [petriId, reason]
-    );
-    if (!up.rows.length) return res.status(404).json({ success: false, error: "Boite introuvable ou deja supprimee" });
-    return res.json({ success: true, deleted: up.rows[0] });
+    if (!petriId) return res.status(400).json({ error: 'ID Petri invalide.' });
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 3) return res.status(400).json({ error: 'Le motif de suppression est obligatoire.' });
+
+    const current = await pool.query(`
+      SELECT id, isolement_id, parent_id, phase, j0, status, gelose_id, created_at, deleted_at, deleted_reason
+      FROM iso_petris WHERE id=$1
+    `, [petriId]);
+    if (!current.rows.length) return res.status(404).json({ error: 'Boite de Petri introuvable.' });
+    const petri = current.rows[0];
+    if (petri.deleted_at) return res.status(409).json({ error: 'Cette boite de Petri est deja supprimee.' });
+    const petriCode = petriDeletionCode(petri);
+    const contextData = { j0: petri.j0, status_before: petri.status, gelose_id: petri.gelose_id, parent_id: petri.parent_id };
+
+    if (role === 'operator') {
+      const duplicate = await pool.query(`SELECT id FROM petri_deletion_requests WHERE petri_id=$1 AND status='pending' LIMIT 1`, [petriId]);
+      if (duplicate.rows.length) return res.status(409).json({ error: 'Une demande de suppression est deja en attente pour cette boite.' });
+      if (req.file) uploadedEvidence = await uploadPetriDeletionEvidence(req.file, petriId);
+      const created = await pool.query(`
+        INSERT INTO petri_deletion_requests
+          (petri_id,isolement_id,phase,petri_code,reason,evidence_path,evidence_bucket,evidence_mime_type,context_data,
+           requested_by,requested_by_name,requested_by_role)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12)
+        RETURNING *
+      `, [
+        petriId, petri.isolement_id || null, petri.phase || null, petriCode, reason,
+        uploadedEvidence?.path || null, PETRI_DELETE_BUCKET, uploadedEvidence?.mimeType || null, JSON.stringify(contextData),
+        req.adminSession?.userId || null, req.adminSession?.username || 'Operateur', role
+      ]);
+      await recordProductionActivity(req, {
+        module: 'petri', actionType: 'delete_requested', itemId: petriId, itemLabel: petriCode,
+        details: { target: 'petri_record', request_id: created.rows[0].id, reason, evidence: Boolean(uploadedEvidence) }
+      });
+      return res.status(202).json({ success: true, pending: true, request_id: created.rows[0].id, message: 'Demande envoyee a un administrateur.' });
+    }
+
+    if (req.file) uploadedEvidence = await uploadPetriDeletionEvidence(req.file, petriId);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const lockedPetri = await lockPetriForDeletion(client, petriId);
+      const deleted = await executePetriSoftDeletion(client, lockedPetri, reason);
+      const now = new Date();
+      await insertPetriDeletionHistory(client, {
+        petri: lockedPetri,
+        petriCode,
+        reason,
+        evidencePath: uploadedEvidence?.path || null,
+        evidenceMimeType: uploadedEvidence?.mimeType || null,
+        requestedBy: req.adminSession?.userId || null,
+        requestedByName: req.adminSession?.username || 'Admin',
+        requestedByRole: 'admin',
+        requestedAt: now,
+        approvedBy: req.adminSession?.userId || null,
+        approvedByName: req.adminSession?.username || 'Admin',
+        approvedAt: now,
+        deletionMode: 'admin_direct',
+        contextData
+      });
+      await client.query(`
+        UPDATE petri_deletion_requests
+           SET status='cancelled', reviewed_by=$2, reviewed_by_name=$3, reviewed_at=now(),
+               review_note=COALESCE(NULLIF(review_note,''),'Suppression directe par administrateur')
+         WHERE petri_id=$1 AND status='pending'
+      `, [petriId, req.adminSession?.userId || null, req.adminSession?.username || 'Admin']);
+      await client.query('COMMIT');
+      await recordProductionActivity(req, {
+        module: 'petri', actionType: 'delete_approved', itemId: petriId, itemLabel: petriCode,
+        details: { target: 'petri_record', direct_admin: true, reason, evidence: Boolean(uploadedEvidence) }
+      });
+      return res.json({ success: true, pending: false, deleted });
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      if (uploadedEvidence?.path) await removePetriDeletionEvidence(uploadedEvidence.path);
+      throw e;
+    } finally { client.release(); }
   } catch (e) {
-    console.error("DELETE /api/petris/:id", e);
+    if (uploadedEvidence?.path && String(req.adminSession?.role || '') === 'operator') {
+      // If the request insert failed after upload, do not leave an orphan file.
+      try {
+        const found = await realPool.query(`SELECT 1 FROM petri_deletion_requests WHERE evidence_path=$1 LIMIT 1`, [uploadedEvidence.path]);
+        if (!found.rows.length) await removePetriDeletionEvidence(uploadedEvidence.path);
+      } catch (_) {}
+    }
+    console.error('POST /api/petris/:id/deletion-request', e);
     return res.status(500).json({ success: false, error: e.message });
   }
+});
+
+// Legacy direct DELETE remains admin-only and requires a real reason.
+// The UI uses the multipart POST route above so an evidence image can be attached.
+app.delete("/api/petris/:id", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensurePetriDeletionWorkflowSchema();
+    if (req.adminSession?.role !== 'admin') return res.status(403).json({ error: 'Seul un administrateur peut supprimer directement une boite de Petri.' });
+    const petriId = Number(req.params.id);
+    const reason = String(req.body?.reason || '').trim();
+    if (!petriId) return res.status(400).json({ success: false, error: 'ID Petri invalide.' });
+    if (reason.length < 3) return res.status(400).json({ success: false, error: 'Le motif de suppression est obligatoire.' });
+    await client.query('BEGIN');
+    const petri = await lockPetriForDeletion(client, petriId);
+    const deleted = await executePetriSoftDeletion(client, petri, reason);
+    const now = new Date();
+    await insertPetriDeletionHistory(client, {
+      petri,
+      petriCode: petriDeletionCode(petri),
+      reason,
+      requestedBy: req.adminSession?.userId || null,
+      requestedByName: req.adminSession?.username || 'Admin',
+      requestedByRole: 'admin',
+      requestedAt: now,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: req.adminSession?.username || 'Admin',
+      approvedAt: now,
+      deletionMode: 'admin_direct',
+      contextData: { j0: petri.j0, status_before: petri.status, gelose_id: petri.gelose_id, parent_id: petri.parent_id }
+    });
+    await client.query('COMMIT');
+    await recordProductionActivity(req, {
+      module: 'petri', actionType: 'delete_approved', itemId: petriId, itemLabel: petriDeletionCode(petri),
+      details: { target: 'petri_record', direct_admin: true, reason, evidence: false, legacy_delete_route: true }
+    });
+    return res.json({ success: true, deleted });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('DELETE /api/petris/:id', e);
+    return res.status(500).json({ success: false, error: e.message });
+  } finally { client.release(); }
 });
 
 // GET /api/petris/:id/journal?days=30

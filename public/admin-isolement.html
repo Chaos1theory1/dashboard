@@ -629,6 +629,55 @@
     }
 
   
+    /* Suppression Petri : motif obligatoire + photo justificative facultative */
+    .petri-delete-modal {
+      position: fixed; inset: 0; z-index: 10030; display: none;
+      align-items: center; justify-content: center; padding: 18px;
+      background: rgba(12, 25, 18, .55); backdrop-filter: blur(3px);
+    }
+    .petri-delete-card {
+      width: min(680px, 100%); max-height: 92vh; overflow: auto;
+      background: #fff; border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.28);
+    }
+    .petri-delete-head {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 18px 20px; border-bottom: 1px solid #e5ebe7;
+    }
+    .petri-delete-head h4 { margin: 0; color: #8f2d23; }
+    .petri-delete-body { padding: 20px; }
+    .petri-delete-warning {
+      padding: 12px 14px; border-radius: 11px; margin-bottom: 16px;
+      background: #fff4f2; border-left: 4px solid var(--baslyagro-red); color: #6f2922;
+      font-size: 13px; line-height: 1.5;
+    }
+    .petri-delete-textarea {
+      width: 100%; min-height: 120px; resize: vertical; box-sizing: border-box;
+      border: 1px solid #cfd9d2; border-radius: 10px; padding: 11px 12px;
+      font-size: 14px; background: #fff;
+    }
+    .petri-delete-photo-actions {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;
+    }
+    .petri-delete-photo-btn {
+      border: 1px solid #cfd9d2; background: #f7faf8; color: #26352b;
+      border-radius: 10px; padding: 11px 12px; font-weight: 800; font-size: 12px;
+      cursor: pointer; text-align: center;
+    }
+    .petri-delete-photo-btn:hover { border-color: var(--baslyagro-green); }
+    .petri-delete-preview {
+      display: none; margin-top: 12px; padding: 10px; border: 1px solid #dfe8e2;
+      border-radius: 12px; background: #f8fbf9;
+    }
+    .petri-delete-preview img { max-width: 180px; max-height: 140px; object-fit: cover; border-radius: 9px; display: block; }
+    .petri-delete-preview-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .petri-delete-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 0 20px 20px; }
+    .petri-delete-actions button { min-width: 120px; }
+    @media (max-width: 600px) {
+      .petri-delete-photo-actions { grid-template-columns: 1fr; }
+      .petri-delete-actions { flex-direction: column-reverse; }
+      .petri-delete-actions button { width: 100%; }
+    }
+
     .btn-delete-iso {
       background: #c0392b;
       color: #fff;
@@ -673,6 +722,7 @@
       } else {
         const auth = requireAdminAuth();
         if (auth) {
+          window.currentAdminRole = auth.role || "";
           document.getElementById("admin-connected-badge").style.display = "flex";
           document.getElementById("admin-username").textContent = auth.username || "Admin";
         }
@@ -1163,6 +1213,48 @@
 
     </div>
   </section>
+
+  <div id="petri-delete-modal" class="petri-delete-modal" role="dialog" aria-modal="true" aria-labelledby="petri-delete-title">
+    <div class="petri-delete-card">
+      <div class="petri-delete-head">
+        <h4 id="petri-delete-title">Suppression d’une boîte de Pétri</h4>
+        <button type="button" class="admin-logout-close" onclick="closePetriDeleteModal()">×</button>
+      </div>
+      <div class="petri-delete-body">
+        <div class="petri-delete-warning" id="petri-delete-role-message">
+          Le motif est obligatoire. Une photo justificative est facultative.
+        </div>
+        <p style="margin:0 0 12px;"><strong>Boîte :</strong> <span id="petri-delete-target-label">—</span></p>
+        <label class="form-label" for="petri-delete-reason">Pourquoi souhaitez-vous retirer cette boîte ? *</label>
+        <textarea id="petri-delete-reason" class="petri-delete-textarea" maxlength="1500" placeholder="Décrivez le problème observé, la raison du retrait ou toute information utile…" required></textarea>
+        <small style="display:block;color:#6d7a72;margin-top:5px;">Ce texte sera conservé dans l’historique de suppression.</small>
+
+        <div style="margin-top:18px;">
+          <label class="form-label">Photo justificative (facultative)</label>
+          <div class="petri-delete-photo-actions">
+            <label class="petri-delete-photo-btn" for="petri-delete-upload">Importer une photo</label>
+            <label class="petri-delete-photo-btn" for="petri-delete-camera">Prendre une photo</label>
+          </div>
+          <input id="petri-delete-upload" type="file" accept="image/*" style="display:none;" />
+          <input id="petri-delete-camera" type="file" accept="image/*" capture="environment" style="display:none;" />
+          <div id="petri-delete-preview" class="petri-delete-preview">
+            <div class="petri-delete-preview-row">
+              <img id="petri-delete-preview-img" alt="Aperçu justificatif" />
+              <div>
+                <strong id="petri-delete-preview-name"></strong><br>
+                <button type="button" class="btn-action btn-grey" style="padding:6px 10px;margin-top:7px;" onclick="clearPetriDeleteEvidence()">Retirer la photo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="petri-delete-error" style="margin-top:12px;color:#c0392b;font-weight:700;"></div>
+      </div>
+      <div class="petri-delete-actions">
+        <button type="button" class="btn-action btn-grey" onclick="closePetriDeleteModal()">Annuler</button>
+        <button type="button" class="btn-action" id="petri-delete-submit" style="background:#c0392b;color:#fff;" onclick="submitPetriDeletion()">Continuer</button>
+      </div>
+    </div>
+  </div>
 
   <div id="stock-summary-modal" class="stock-modal">
     <div class="stock-modal-card">
@@ -2554,29 +2646,168 @@ ${labels}
         }
       }
 
-      async function deletePetri(petriId) {
+      let petriDeleteTargetId = null;
+      let petriDeleteEvidenceFile = null;
+      let petriDeletePreviewUrl = null;
+
+      function petriDeleteLabel(petriId) {
+        const p = (currentPetris || []).find(function(x) { return Number(x.id) === Number(petriId); });
+        if (!p) return 'Petri ID ' + petriId;
+        return 'P' + (p.phase || '—') + ' — ID ' + p.id + ' — ' + getPetriCode(p);
+      }
+
+      function openPetriDeleteModal(petriId) {
         if (!petriId) return;
-        const ok = confirm("🗑️ Envoyer cette boîte de Pétri à la corbeille ?\n\nElle sera cachée de la liste mais gardée en traçabilité.");
-        if (!ok) return;
+        petriDeleteTargetId = Number(petriId);
+        document.getElementById('petri-delete-target-label').textContent = petriDeleteLabel(petriId);
+        document.getElementById('petri-delete-reason').value = '';
+        document.getElementById('petri-delete-error').textContent = '';
+        clearPetriDeleteEvidence();
+        const role = String(window.currentAdminRole || '').toLowerCase();
+        const roleMessage = document.getElementById('petri-delete-role-message');
+        const submit = document.getElementById('petri-delete-submit');
+        if (role === 'admin') {
+          roleMessage.textContent = 'Administrateur : après confirmation, la boîte sera retirée immédiatement. Le motif sera enregistré dans l’historique. La photo justificative est facultative.';
+          submit.textContent = 'Supprimer la boîte';
+        } else {
+          roleMessage.textContent = 'Opérateur : votre demande sera envoyée à un administrateur. La boîte restera active jusqu’à approbation. Le motif est obligatoire; la photo est facultative.';
+          submit.textContent = 'Envoyer la demande';
+        }
+        document.getElementById('petri-delete-modal').style.display = 'flex';
+        setTimeout(function() { document.getElementById('petri-delete-reason').focus(); }, 50);
+      }
+
+      function closePetriDeleteModal() {
+        document.getElementById('petri-delete-modal').style.display = 'none';
+        petriDeleteTargetId = null;
+        clearPetriDeleteEvidence();
+      }
+
+      function clearPetriDeleteEvidence() {
+        petriDeleteEvidenceFile = null;
+        const upload = document.getElementById('petri-delete-upload');
+        const camera = document.getElementById('petri-delete-camera');
+        if (upload) upload.value = '';
+        if (camera) camera.value = '';
+        if (petriDeletePreviewUrl) URL.revokeObjectURL(petriDeletePreviewUrl);
+        petriDeletePreviewUrl = null;
+        const preview = document.getElementById('petri-delete-preview');
+        if (preview) preview.style.display = 'none';
+      }
+
+      async function compressPetriDeleteEvidence(file) {
+        if (!file) return null;
+        const maxUpload = 3.5 * 1024 * 1024;
         try {
-          const res = await fetch(API_BASE + "/api/petris/" + petriId, {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reason: "Suppression depuis admin-isolement" })
+          const imageUrl = URL.createObjectURL(file);
+          const img = new Image();
+          await new Promise(function(resolve, reject) {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = imageUrl;
           });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || data.success === false) throw new Error(data.error || "Erreur suppression");
-          alert("✅ Boîte envoyée à la corbeille.");
-          if (selectedIsoId) {
-            await loadPetrisList(selectedIsoId);
-            await loadIsolationRecap(selectedIsoId);
+          URL.revokeObjectURL(imageUrl);
+          const maxSide = 1600;
+          const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+          const width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+          const height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          let quality = .84;
+          let blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/jpeg', quality); });
+          while (blob && blob.size > maxUpload && quality > .48) {
+            quality -= .08;
+            blob = await new Promise(function(resolve) { canvas.toBlob(resolve, 'image/jpeg', quality); });
+          }
+          if (!blob) throw new Error('Compression impossible');
+          if (blob.size > maxUpload) throw new Error('La photo reste trop volumineuse apres compression.');
+          const base = String(file.name || 'justificatif').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+          return new File([blob], base + '.jpg', { type: 'image/jpeg' });
+        } catch (e) {
+          if (file.size <= maxUpload) return file;
+          throw new Error('Photo trop volumineuse ou format non lisible par le navigateur. Choisissez une image de moins de 3,5 Mo.');
+        }
+      }
+
+      async function choosePetriDeleteEvidence(file) {
+        if (!file) return;
+        const errorEl = document.getElementById('petri-delete-error');
+        errorEl.textContent = 'Préparation de la photo…';
+        try {
+          petriDeleteEvidenceFile = await compressPetriDeleteEvidence(file);
+          if (petriDeletePreviewUrl) URL.revokeObjectURL(petriDeletePreviewUrl);
+          petriDeletePreviewUrl = URL.createObjectURL(petriDeleteEvidenceFile);
+          document.getElementById('petri-delete-preview-img').src = petriDeletePreviewUrl;
+          document.getElementById('petri-delete-preview-name').textContent = petriDeleteEvidenceFile.name;
+          document.getElementById('petri-delete-preview').style.display = 'block';
+          errorEl.textContent = '';
+        } catch (e) {
+          clearPetriDeleteEvidence();
+          errorEl.textContent = e.message || String(e);
+        }
+      }
+
+      async function submitPetriDeletion() {
+        if (!petriDeleteTargetId) return;
+        const reason = String(document.getElementById('petri-delete-reason').value || '').trim();
+        const errorEl = document.getElementById('petri-delete-error');
+        if (reason.length < 3) {
+          errorEl.textContent = 'Le motif de suppression est obligatoire.';
+          document.getElementById('petri-delete-reason').focus();
+          return;
+        }
+        const submit = document.getElementById('petri-delete-submit');
+        submit.disabled = true;
+        errorEl.textContent = 'Envoi en cours…';
+        try {
+          const fd = new FormData();
+          fd.append('reason', reason);
+          if (petriDeleteEvidenceFile) fd.append('evidence_photo', petriDeleteEvidenceFile, petriDeleteEvidenceFile.name);
+          const res = await fetch(API_BASE + '/api/petris/' + petriDeleteTargetId + '/deletion-request', {
+            method: 'POST',
+            body: fd
+          });
+          const data = await res.json().catch(function() { return {}; });
+          if (!res.ok || data.success === false) throw new Error(data.error || 'Suppression impossible');
+          const wasPending = Boolean(data.pending);
+          closePetriDeleteModal();
+          if (wasPending) {
+            alert('⏳ Demande envoyée à un administrateur. La boîte reste visible jusqu’à l’approbation.');
+          } else {
+            alert('✅ Boîte retirée. Le motif a été enregistré dans l’historique.');
+            if (selectedIsoId) {
+              await loadPetrisList(selectedIsoId);
+              await loadIsolationRecap(selectedIsoId);
+            }
           }
         } catch (e) {
           console.error(e);
-          alert("❌ Erreur : " + e.message);
+          errorEl.textContent = '❌ ' + (e.message || e);
+        } finally {
+          submit.disabled = false;
         }
       }
+
+      document.getElementById('petri-delete-upload').addEventListener('change', function(e) {
+        choosePetriDeleteEvidence(e.target.files && e.target.files[0]);
+      });
+      document.getElementById('petri-delete-camera').addEventListener('change', function(e) {
+        choosePetriDeleteEvidence(e.target.files && e.target.files[0]);
+      });
+      document.getElementById('petri-delete-modal').addEventListener('click', function(e) {
+        if (e.target === this) closePetriDeleteModal();
+      });
+
+      function deletePetri(petriId) {
+        openPetriDeleteModal(petriId);
+      }
       window.deletePetri = deletePetri;
+      window.openPetriDeleteModal = openPetriDeleteModal;
+      window.closePetriDeleteModal = closePetriDeleteModal;
+      window.clearPetriDeleteEvidence = clearPetriDeleteEvidence;
+      window.submitPetriDeletion = submitPetriDeletion;
 
       function deselectIsolation() {
         selectedIsoId = null;
