@@ -721,6 +721,9 @@
     .strain-admin-modal-actions{display:flex;justify-content:flex-end;gap:9px;padding:0 20px 20px}
     .btn-action.btn-blue{background:#1769ff;color:#fff}
     .btn-action.btn-red{background:#c0392b;color:#fff}
+    .strain-cert-note{margin:0 0 14px;padding:11px 13px;border-radius:10px;background:#eef8f1;border-left:4px solid #2fa35a;color:#315b3e;font-size:12px;line-height:1.45}
+    .strain-cert-file-help{font-size:11px;color:#6e7d73;margin-top:-6px;margin-bottom:12px}
+    .strain-pending-badge{display:inline-flex;align-items:center;padding:6px 9px;border-radius:8px;background:#fff3cd;color:#856404;font-size:11px;font-weight:800}
     @media(max-width:700px){.strain-edit-grid{grid-template-columns:1fr}}
   </style>
 </head>
@@ -1183,6 +1186,65 @@
     </div>
   </div>
 
+  <div id="strain-certify-modal" class="strain-admin-modal" aria-hidden="true">
+    <div class="strain-admin-modal-card" role="dialog" aria-modal="true" aria-labelledby="strain-certify-title">
+      <div class="strain-admin-modal-head">
+        <h4 id="strain-certify-title">Certifier la souche</h4>
+        <button type="button" class="strain-admin-modal-close" onclick="closeCertifyModal()" aria-label="Fermer">×</button>
+      </div>
+      <form id="form-strain-certification">
+        <div class="strain-admin-modal-body">
+          <input type="hidden" id="cert-strain-id">
+          <div id="cert-role-note" class="strain-cert-note"></div>
+          <div class="strain-edit-grid">
+            <div class="full">
+              <label class="form-label">Référence du certificat *</label>
+              <input class="form-input" id="cert-certificate-ref" required maxlength="500" placeholder="Ex : CERT-2026-001">
+            </div>
+            <div>
+              <label class="form-label">Certifié / contrôlé par</label>
+              <input class="form-input" id="cert-certified-by" maxlength="255">
+            </div>
+            <div>
+              <label class="form-label">Statut contamination</label>
+              <input class="form-input" id="cert-contamination-status" maxlength="120" placeholder="Ex : Aucune contamination">
+            </div>
+            <div>
+              <label class="form-label">Type de contamination</label>
+              <input class="form-input" id="cert-contamination-type" maxlength="255" placeholder="Optionnel">
+            </div>
+            <div>
+              <label class="form-label">Taux / vitesse de croissance</label>
+              <input type="number" step="0.01" class="form-input" id="cert-growth-rate" placeholder="Optionnel">
+            </div>
+            <div>
+              <label class="form-label">Jours de colonisation</label>
+              <input type="number" step="1" min="0" class="form-input" id="cert-colonization-days" placeholder="Optionnel">
+            </div>
+            <div>
+              <label class="form-label">Morphologie</label>
+              <input class="form-input" id="cert-morphology-status" maxlength="255" placeholder="Optionnel">
+            </div>
+            <div class="full">
+              <label class="form-label">Document certificat PDF</label>
+              <input type="file" class="form-input" id="cert-certificate-pdf" accept="application/pdf,.pdf">
+              <div class="strain-cert-file-help">Le fichier est facultatif. La référence du certificat est le seul champ obligatoire pour la certification.</div>
+            </div>
+            <div class="full">
+              <label class="form-label">Notes</label>
+              <textarea class="form-textarea" id="cert-notes" placeholder="Observations de certification..."></textarea>
+            </div>
+          </div>
+          <div id="cert-submit-message" style="margin-top:8px;font-size:12px;"></div>
+        </div>
+        <div class="strain-admin-modal-actions">
+          <button type="button" class="btn-action btn-grey" onclick="closeCertifyModal()">Annuler</button>
+          <button type="submit" class="btn-action btn-orange" id="btn-submit-certification">📄 Soumettre la certification</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     const API_BASE = window.location.origin;
 
@@ -1549,12 +1611,18 @@ let currentCycle = null;
 
       const isAdmin = currentUserIsAdmin();
       tbody.innerHTML = strains.map(s => {
-        const certificationAction = s.certification_status !== 'CERTIFIED'
-          ? `<button class="btn-action btn-orange" style="padding:6px 10px;font-size:11px;"
+        const certStatus = String(s.certification_status || '').toUpperCase();
+        let certificationAction = '';
+        if (certStatus === 'PENDING_REVIEW') {
+          certificationAction = isAdmin
+            ? `<a class="btn-action btn-orange" style="padding:6px 10px;font-size:11px;text-decoration:none;" href="admin-users.html#strain-certification-approvals" onclick="event.stopPropagation();">📄 Examiner</a>`
+            : `<span class="strain-pending-badge">⏳ En attente admin</span>`;
+        } else if (certStatus !== 'CERTIFIED') {
+          certificationAction = `<button class="btn-action btn-orange" style="padding:6px 10px;font-size:11px;"
                onclick="event.stopPropagation(); openCertifyModal('${s.id}', '${String(s.code||'').replace(/'/g,"\\'")}', '${String(s.name||'').replace(/'/g,"\\'")}')">
                📄 Certifier
-             </button>`
-          : '';
+             </button>`;
+        }
         const adminActions = isAdmin
           ? `<button class="btn-action btn-blue" style="padding:6px 10px;font-size:11px;" onclick="event.stopPropagation(); openEditStrainModal('${s.id}')">✏️ Modifier</button>
              <button class="btn-action btn-red" style="padding:6px 10px;font-size:11px;" onclick="event.stopPropagation(); deleteStrainAdmin('${s.id}')">🗑️ Supprimer</button>`
@@ -2253,8 +2321,85 @@ Entrez le numéro :`, '1');
     }
 
     function openCertifyModal(strainId, code, name) {
-      alert(`Fonction de certification à implémenter pour ${code}`);
-      // TODO: Ouvrir modal certification
+      const auth = getCurrentAuth() || {};
+      const isAdmin = currentUserIsAdmin();
+      document.getElementById('cert-strain-id').value = strainId || '';
+      document.getElementById('strain-certify-title').textContent = `Certification — ${code || name || 'Souche'}`;
+      document.getElementById('cert-certificate-ref').value = '';
+      document.getElementById('cert-certified-by').value = auth.username || '';
+      document.getElementById('cert-contamination-status').value = '';
+      document.getElementById('cert-contamination-type').value = '';
+      document.getElementById('cert-growth-rate').value = '';
+      document.getElementById('cert-colonization-days').value = '';
+      document.getElementById('cert-morphology-status').value = '';
+      document.getElementById('cert-certificate-pdf').value = '';
+      document.getElementById('cert-notes').value = '';
+      document.getElementById('cert-submit-message').textContent = '';
+      document.getElementById('cert-role-note').textContent = isAdmin
+        ? 'Administrateur : la certification sera validée immédiatement après l’envoi du formulaire.'
+        : 'Opérateur : votre certification sera enregistrée comme demande en attente. Un administrateur pourra vérifier et corriger les champs, remplacer le PDF éventuel, puis approuver ou refuser.';
+      document.getElementById('btn-submit-certification').textContent = isAdmin
+        ? '✅ Certifier immédiatement'
+        : '📨 Envoyer pour approbation';
+      const modal = document.getElementById('strain-certify-modal');
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeCertifyModal() {
+      const modal = document.getElementById('strain-certify-modal');
+      if (!modal) return;
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    async function submitStrainCertification(event) {
+      event.preventDefault();
+      const strainId = document.getElementById('cert-strain-id').value;
+      const certificateRef = document.getElementById('cert-certificate-ref').value.trim();
+      if (!strainId) return alert('Souche introuvable.');
+      if (!certificateRef) return alert('La référence du certificat est obligatoire.');
+
+      const button = document.getElementById('btn-submit-certification');
+      const message = document.getElementById('cert-submit-message');
+      button.disabled = true;
+      message.textContent = 'Enregistrement de la certification…';
+
+      const fd = new FormData();
+      fd.append('certificate_ref', certificateRef);
+      fd.append('certified_by', document.getElementById('cert-certified-by').value.trim());
+      fd.append('contamination_status', document.getElementById('cert-contamination-status').value.trim());
+      fd.append('contamination_type', document.getElementById('cert-contamination-type').value.trim());
+      fd.append('growth_rate', document.getElementById('cert-growth-rate').value);
+      fd.append('colonization_days', document.getElementById('cert-colonization-days').value);
+      fd.append('morphology_status', document.getElementById('cert-morphology-status').value.trim());
+      fd.append('notes', document.getElementById('cert-notes').value.trim());
+      fd.append('decision', 'PASS');
+      const file = document.getElementById('cert-certificate-pdf').files[0];
+      if (file) fd.append('certificate_pdf', file);
+
+      try {
+        const res = await fetch(`${API_BASE}/api/strains/${encodeURIComponent(strainId)}/certify`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+        if (data.pending) {
+          alert('✅ Demande de certification envoyée à un administrateur.');
+        } else {
+          alert('✅ Souche certifiée et autorisée pour la production.');
+        }
+        closeCertifyModal();
+        await loadStrains();
+        await loadSummary();
+      } catch (error) {
+        message.textContent = '❌ ' + (error.message || error);
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function logout() {
@@ -2443,13 +2588,20 @@ function certifyLC(lcId) {
 
   
 
-// Fermer le formulaire admin de modification avec Echap ou clic hors carte.
+// Fermer les formulaires avec Echap ou clic hors carte.
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeEditStrainModal();
+  if (event.key === 'Escape') {
+    closeEditStrainModal();
+    closeCertifyModal();
+  }
 });
 document.getElementById('strain-edit-modal')?.addEventListener('click', (event) => {
   if (event.target && event.target.id === 'strain-edit-modal') closeEditStrainModal();
 });
+document.getElementById('strain-certify-modal')?.addEventListener('click', (event) => {
+  if (event.target && event.target.id === 'strain-certify-modal') closeCertifyModal();
+});
+document.getElementById('form-strain-certification')?.addEventListener('submit', submitStrainCertification);
 
 // --- expose submitLcInline for external handlers (fix ReferenceError) ---
 try {

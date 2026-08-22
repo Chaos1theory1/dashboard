@@ -388,11 +388,82 @@ const upload = multer({
     cb(null, true);
   }
 });
-router.post(
-  '/strains/:id/certify',
-  upload.single('certificate_pdf'),
-  async (req, res) => {
-    const {
+function normalizeCertificationPayload(body = {}, fallbackCertifiedBy = '') {
+  const colonizationRaw = cleanNumber(body.colonization_days);
+  return {
+    certificate_ref: cleanText(body.certificate_ref, 500),
+    certified_by: cleanText(body.certified_by, 255) || cleanText(fallbackCertifiedBy, 255),
+    contamination_status: cleanText(body.contamination_status, 120),
+    contamination_type: cleanText(body.contamination_type, 255),
+    growth_rate: cleanNumber(body.growth_rate),
+    colonization_days: colonizationRaw === null ? null : Math.max(0, Math.trunc(colonizationRaw)),
+    morphology_status: cleanText(body.morphology_status, 255),
+    decision: 'PASS',
+    notes: cleanText(body.notes, 10000),
+  };
+}
+
+function validateCertificationPayload(payload) {
+  if (!payload.certificate_ref) {
+    const error = new Error('La référence du certificat est obligatoire.');
+    error.status = 400;
+    throw error;
+  }
+}
+
+async function ensureStrainCertificationApprovalSchema(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS strain_certification_requests (
+      id BIGSERIAL PRIMARY KEY,
+      strain_id UUID NOT NULL REFERENCES strains(id) ON DELETE CASCADE,
+      payload JSONB NOT NULL,
+      certificate_file_url TEXT,
+      certificate_file_name TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','approved','cancelled')),
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by UUID,
+      reviewed_by_name TEXT,
+      reviewed_at TIMESTAMPTZ,
+      review_note TEXT
+    )
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_strain_certification_pending
+    ON strain_certification_requests (strain_id)
+    WHERE status='pending'
+  `);
+}
+
+async function getStrainForCertification(db, strainId, lock = false) {
+  const result = await db.query(
+    `SELECT id,code,name,species,strain_type,certification_status,production_allowed
+     FROM strains
+     WHERE id=$1::uuid${lock ? ' FOR UPDATE' : ''}`,
+    [strainId]
+  );
+  if (!result.rows.length) {
+    const error = new Error('Souche introuvable.');
+    error.status = 404;
+    throw error;
+  }
+  return result.rows[0];
+}
+
+async function applyStrainCertification(db, strainId, payload, pdfPath) {
+  validateCertificationPayload(payload);
+  const strain = await getStrainForCertification(db, strainId, true);
+  if (String(strain.certification_status || '').toUpperCase() === 'CERTIFIED') {
+    const error = new Error('Cette souche est déjà certifiée.');
+    error.status = 409;
+    throw error;
+  }
+
+  const certificate = await db.query(
+    `INSERT INTO strain_certificates (
+      strain_id,
       certificate_ref,
       certified_by,
       contamination_status,
@@ -401,79 +472,330 @@ router.post(
       colonization_days,
       morphology_status,
       decision,
-      notes
-    } = req.body;
+      notes,
+      pdf_path
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    RETURNING *`,
+    [
+      strainId,
+      payload.certificate_ref,
+      payload.certified_by,
+      payload.contamination_status,
+      payload.contamination_type,
+      payload.growth_rate,
+      payload.colonization_days,
+      payload.morphology_status,
+      'PASS',
+      payload.notes,
+      pdfPath || null,
+    ]
+  );
 
-    if (!req.file) {
-      return res.status(400).json({ error: 'Certificat PDF manquant' });
+  const updated = await db.query(
+    `UPDATE strains
+     SET certificate_available=true,
+         certification_status='CERTIFIED',
+         production_allowed=true,
+         updated_at=now()
+     WHERE id=$1::uuid
+     RETURNING *`,
+    [strainId]
+  );
+
+  return { strain: updated.rows[0], certificate: certificate.rows[0] };
+}
+
+async function persistOptionalCertificate(req) {
+  if (!req.file) return null;
+  return persistUploadedFile({
+    file: req.file,
+    folder: 'certificates',
+    filename: req.file.filename || certificateFilename(req, req.file),
+  });
+}
+
+// Admin: consulter les demandes de certification soumises par les opérateurs.
+router.get('/strain-certification-requests', async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(403).json({ error: 'Réservé aux administrateurs' });
+  try {
+    await ensureStrainCertificationApprovalSchema(req.db);
+    const result = await req.db.query(`
+      SELECT r.id,r.strain_id,r.payload,r.certificate_file_url,r.certificate_file_name,
+             r.status,r.requested_by,r.requested_by_name,r.requested_at,
+             r.reviewed_by,r.reviewed_by_name,r.reviewed_at,r.review_note,
+             s.code AS strain_code,s.name AS strain_name,s.species AS strain_species,
+             s.strain_type,s.certification_status
+      FROM strain_certification_requests r
+      JOIN strains s ON s.id=r.strain_id
+      WHERE r.status='pending'
+      ORDER BY r.requested_at ASC
+      LIMIT 300
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('GET /api/strain-certification-requests:', error);
+    res.status(500).json({ error: 'Impossible de charger les demandes de certification' });
+  }
+});
+
+// Admin: refuser une demande. La demande est supprimée du registre et le fichier temporaire aussi.
+router.post('/strain-certification-requests/:id/reject', async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(403).json({ error: 'Réservé aux administrateurs' });
+  await ensureStrainCertificationApprovalSchema(req.db);
+  const client = await req.db.connect();
+  let fileToDelete = null;
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT * FROM strain_certification_requests WHERE id=$1 FOR UPDATE`,
+      [Number(req.params.id)]
+    );
+    if (!locked.rows.length || locked.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Cette demande a déjà été traitée.' });
     }
 
-    if (decision !== 'PASS') {
-      return res.status(400).json({ error: 'La certification doit être PASS' });
-    }
+    const requestRow = locked.rows[0];
+    fileToDelete = requestRow.certificate_file_url || null;
 
-    let pdfPath = null;
+    // Le refus annule l'état "en cours" de la souche.
+    await client.query(
+      `UPDATE strains
+       SET certification_status='NOT_CERTIFIED',production_allowed=false,updated_at=now()
+       WHERE id=$1::uuid AND certification_status='PENDING_REVIEW'`,
+      [requestRow.strain_id]
+    );
+
+    // Exigence métier : un refus ne reste pas dans le registre des demandes.
+    await client.query(`DELETE FROM strain_certification_requests WHERE id=$1`, [Number(req.params.id)]);
+    await client.query('COMMIT');
+
+    let storageWarning = null;
+    if (fileToDelete) {
+      try { await deleteStoredFile(fileToDelete, path.join(__dirname, '../..')); }
+      catch (error) { storageWarning = error.message || String(error); }
+    }
+    res.json({ success: true, deleted: true, storage_warning: storageWarning });
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('POST /api/strain-certification-requests/:id/reject:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Erreur lors du refus' });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin: peut corriger les champs et remplacer/supprimer le PDF avant d'approuver.
+router.post(
+  '/strain-certification-requests/:id/approve',
+  upload.single('certificate_pdf'),
+  async (req, res) => {
+    if (!isAdminRequest(req)) return res.status(403).json({ error: 'Réservé aux administrateurs' });
+    await ensureStrainCertificationApprovalSchema(req.db);
+
+    const client = await req.db.connect();
+    let replacementPath = null;
+    let oldFilePath = null;
     try {
-      pdfPath = await persistUploadedFile({
-        file: req.file,
-        folder: 'certificates',
-        filename: req.file.filename || certificateFilename(req, req.file),
-      });
-      await req.db.query('BEGIN');
+      await client.query('BEGIN');
+      const locked = await client.query(
+        `SELECT * FROM strain_certification_requests WHERE id=$1 FOR UPDATE`,
+        [Number(req.params.id)]
+      );
+      if (!locked.rows.length || locked.rows[0].status !== 'pending') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Cette demande a déjà été traitée.' });
+      }
 
-      // 1️⃣ Enregistrer le certificat
-      await req.db.query(
-        `
-        INSERT INTO strain_certificates (
-          strain_id,
-          certificate_ref,
-          certified_by,
-          contamination_status,
-          contamination_type,
-          growth_rate,
-          colonization_days,
-          morphology_status,
-          decision,
-          notes,
-          pdf_path
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-        `,
+      const requestRow = locked.rows[0];
+      oldFilePath = requestRow.certificate_file_url || null;
+      const payload = normalizeCertificationPayload(
+        { ...(requestRow.payload || {}), ...(req.body || {}) },
+        req.adminSession?.username || 'Admin'
+      );
+      validateCertificationPayload(payload);
+
+      if (req.file) replacementPath = await persistOptionalCertificate(req);
+      const removeExistingFile = String(req.body?.remove_certificate_file || '').toLowerCase() === 'true';
+      const finalPdfPath = replacementPath || (removeExistingFile ? null : oldFilePath);
+
+      const approved = await applyStrainCertification(client, requestRow.strain_id, payload, finalPdfPath);
+      await client.query(
+        `UPDATE strain_certification_requests
+         SET status='approved',payload=$2::jsonb,certificate_file_url=$3,
+             certificate_file_name=$4,reviewed_by=$5,reviewed_by_name=$6,
+             reviewed_at=now(),review_note=$7
+         WHERE id=$1`,
         [
-          req.params.id,
-          certificate_ref,
-          certified_by,
-          contamination_status,
-          contamination_type || null,
-          growth_rate || null,
-          colonization_days || null,
-          morphology_status || null,
-          decision,
-          notes || null,
-          pdfPath
+          Number(req.params.id),
+          JSON.stringify(payload),
+          finalPdfPath,
+          req.file?.originalname || requestRow.certificate_file_name || null,
+          req.adminSession?.userId || null,
+          req.adminSession?.username || 'Admin',
+          cleanText(req.body?.review_note, 5000),
         ]
       );
+      await client.query('COMMIT');
 
-      // 2️⃣ Mettre à jour la souche
-      await req.db.query(
-        `
-        UPDATE strains
-        SET
-          certificate_available = true,
-          certification_status = 'CERTIFIED',
-          production_allowed = true
-        WHERE id = $1
-        `,
+      if (oldFilePath && oldFilePath !== finalPdfPath) {
+        try { await deleteStoredFile(oldFilePath, path.join(__dirname, '../..')); }
+        catch (error) { console.warn('Ancien certificat non supprimé:', error.message); }
+      }
+
+      res.json({ success: true, approved: true, ...approved });
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      if (replacementPath) {
+        try { await deleteStoredFile(replacementPath, path.join(__dirname, '../..')); } catch (_) {}
+      }
+      console.error('POST /api/strain-certification-requests/:id/approve:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Erreur lors de l’approbation' });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// Même bouton pour tous les rôles :
+// - admin => certification appliquée immédiatement ;
+// - operator => demande mise en attente pour validation admin.
+router.post(
+  '/strains/:id/certify',
+  upload.single('certificate_pdf'),
+  async (req, res) => {
+    if (!isAdminRequest(req) && !isOperatorRequest(req)) {
+      return res.status(403).json({ error: 'Rôle non autorisé à initier une certification.' });
+    }
+
+    const payload = normalizeCertificationPayload(req.body || {}, req.adminSession?.username || 'Utilisateur');
+    try {
+      validateCertificationPayload(payload);
+      const strain = await getStrainForCertification(req.db, req.params.id, false);
+      if (String(strain.certification_status || '').toUpperCase() === 'CERTIFIED') {
+        return res.status(409).json({ error: 'Cette souche est déjà certifiée.' });
+      }
+
+      await ensureStrainCertificationApprovalSchema(req.db);
+
+      if (isOperatorRequest(req)) {
+        const existingPending = await req.db.query(
+          `SELECT id FROM strain_certification_requests WHERE strain_id=$1::uuid AND status='pending' LIMIT 1`,
+          [req.params.id]
+        );
+        if (existingPending.rows.length) {
+          return res.status(409).json({ error: 'Une demande de certification est déjà en attente pour cette souche.' });
+        }
+
+        let storedFile = null;
+        try {
+          if (req.file) storedFile = await persistOptionalCertificate(req);
+          const client = await req.db.connect();
+          try {
+            await client.query('BEGIN');
+            const inserted = await client.query(
+              `INSERT INTO strain_certification_requests
+                (strain_id,payload,certificate_file_url,certificate_file_name,requested_by,requested_by_name)
+               VALUES ($1::uuid,$2::jsonb,$3,$4,$5,$6)
+               RETURNING id,status,requested_at`,
+              [
+                req.params.id,
+                JSON.stringify(payload),
+                storedFile,
+                req.file?.originalname || null,
+                req.adminSession?.userId || null,
+                req.adminSession?.username || 'Opérateur',
+              ]
+            );
+            await client.query(
+              `UPDATE strains
+               SET certification_status='PENDING_REVIEW',production_allowed=false,updated_at=now()
+               WHERE id=$1::uuid`,
+              [req.params.id]
+            );
+            await client.query('COMMIT');
+            return res.status(202).json({
+              success: true,
+              pending: true,
+              request_id: inserted.rows[0].id,
+              message: 'Demande de certification envoyée à un administrateur.'
+            });
+          } catch (error) {
+            try { await client.query('ROLLBACK'); } catch (_) {}
+            throw error;
+          } finally {
+            client.release();
+          }
+        } catch (error) {
+          if (storedFile) {
+            try { await deleteStoredFile(storedFile, path.join(__dirname, '../..')); } catch (_) {}
+          }
+          if (error.code === '23505') {
+            return res.status(409).json({ error: 'Une demande de certification est déjà en attente pour cette souche.' });
+          }
+          throw error;
+        }
+      }
+
+      // Administrateur : pas d'étape d'approbation supplémentaire.
+      const pending = await req.db.query(
+        `SELECT id,certificate_file_url FROM strain_certification_requests
+         WHERE strain_id=$1::uuid AND status='pending'`,
         [req.params.id]
       );
+      let newPdfPath = null;
+      let finalPdfPath = pending.rows[0]?.certificate_file_url || null;
+      try {
+        if (req.file) {
+          newPdfPath = await persistOptionalCertificate(req);
+          finalPdfPath = newPdfPath;
+        }
 
-      await req.db.query('COMMIT');
+        const client = await req.db.connect();
+        try {
+          await client.query('BEGIN');
+          const approved = await applyStrainCertification(client, req.params.id, payload, finalPdfPath);
+          await client.query(
+            `UPDATE strain_certification_requests
+             SET status='approved',payload=$2::jsonb,certificate_file_url=$3,
+                 certificate_file_name=COALESCE($4,certificate_file_name),
+                 reviewed_by=$5,reviewed_by_name=$6,reviewed_at=now(),
+                 review_note='Certification effectuée directement par un administrateur.'
+             WHERE strain_id=$1::uuid AND status='pending'`,
+            [
+              req.params.id,
+              JSON.stringify(payload),
+              finalPdfPath,
+              req.file?.originalname || null,
+              req.adminSession?.userId || null,
+              req.adminSession?.username || 'Admin',
+            ]
+          );
+          await client.query('COMMIT');
 
-      res.json({ success: true });
+          for (const row of pending.rows) {
+            const oldPath = row.certificate_file_url;
+            if (oldPath && oldPath !== finalPdfPath) {
+              try { await deleteStoredFile(oldPath, path.join(__dirname, '../..')); }
+              catch (error) { console.warn('Ancien certificat de demande non supprimé:', error.message); }
+            }
+          }
+          return res.json({ success: true, approved: true, ...approved });
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch (_) {}
+          throw error;
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        if (newPdfPath) {
+          try { await deleteStoredFile(newPdfPath, path.join(__dirname, '../..')); } catch (_) {}
+        }
+        throw error;
+      }
     } catch (error) {
-      try { await req.db.query('ROLLBACK'); } catch (_) {}
-      if (pdfPath) await deleteStoredFile(pdfPath, path.join(__dirname, '../..'));
-      console.error(error);
-      res.status(500).json({ error: error.message });
+      console.error('POST /api/strains/:id/certify:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Erreur de certification' });
     }
   }
 );

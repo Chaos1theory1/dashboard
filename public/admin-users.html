@@ -6,6 +6,7 @@
   <link rel="icon" href="images/logo.png" type="image/png"><link rel="stylesheet" href="css/bootstrap.css"><link rel="stylesheet" href="css/style.css">
   <style>
     :root{--green:#2fa35a;--dark:#1f7a41;--red:#c0392b;--blue:#1769ff}body{background:#eef5f0;color:#26352b}.admin-big-logo{text-align:center;padding:12px;background:#315947}.admin-big-logo img{width:92px;height:92px;border-radius:50%;background:#fff;border:4px solid var(--green)}.admin-menu-bar{background:#fff;padding:15px 0;border-bottom:2px solid #e5e5e5;text-align:center}.admin-menu-bar a{margin:0 12px;font-weight:700;text-transform:uppercase;font-size:12px;text-decoration:none;color:#444}.admin-menu-bar a.active{color:var(--green)}.wrap{max-width:1250px;margin:26px auto;padding:0 16px}.cardx{background:#fff;border-radius:14px;padding:20px;margin-bottom:20px;box-shadow:0 8px 25px rgba(0,0,0,.08)}h1{font-size:26px;color:var(--dark)}h2{font-size:19px;color:var(--dark)}.grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px}.grid input,.grid select,.activity-filters input,.activity-filters select{width:100%;padding:10px;border:1px solid #ccd8cf;border-radius:8px;background:#fff}.btnx{border:0;border-radius:8px;padding:9px 12px;color:#fff;font-weight:800;cursor:pointer}.btnx:disabled{cursor:not-allowed;opacity:.45}.green{background:var(--green)}.blue{background:var(--blue)}.red{background:var(--red)}.grey{background:#667085}.orange{background:#d97706}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px;border-bottom:1px solid #e6ece8;text-align:left;vertical-align:middle}.status{display:inline-block;border-radius:999px;padding:4px 8px;font-weight:800;font-size:11px}.online{background:#dff5e8;color:#116b35}.offline{background:#edf0f2;color:#667085}.frozen{background:#ffe1dd;color:#922b21}.actions{display:flex;gap:6px;flex-wrap:wrap}.photo-request{display:grid;grid-template-columns:120px 1fr auto;gap:14px;align-items:center;border:1px solid #e4ebe6;border-radius:12px;padding:12px;margin-top:10px}.photo-request img{width:120px;height:90px;object-fit:cover;border-radius:8px}.strain-request{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;border:1px solid #dce9df;border-left:5px solid var(--green);border-radius:12px;padding:14px;margin-top:10px;background:#fbfefc}.strain-request-details{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px 16px;margin-top:9px;font-size:12px}.strain-request-details span{display:block;color:#607067}.strain-request-details strong{display:block;color:#25382b;margin-top:2px}.empty{padding:20px;text-align:center;color:#777;background:#f8faf9;border-radius:10px}.pending-count{background:var(--red);color:#fff;border-radius:999px;padding:3px 8px;font-size:12px}.activity-filters{display:grid;grid-template-columns:180px 1fr 200px auto;gap:10px;align-items:end}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0}.metric{background:#edf8f1;border:1px solid #d4eadc;border-radius:10px;padding:13px}.metric strong{display:block;font-size:25px;color:var(--dark)}.module-pill{display:inline-block;padding:3px 8px;border-radius:999px;background:#e9f0ec;font-weight:800;font-size:11px}.activity-pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:16px}.activity-pagination-status{min-width:150px;text-align:center;font-weight:800;color:var(--dark)}@media(max-width:800px){.grid,.activity-filters,.metrics,.strain-request-details{grid-template-columns:1fr}.photo-request,.strain-request{grid-template-columns:1fr}.photo-request img{width:100%;height:180px}.activity-pagination{flex-wrap:wrap}}
+    .cert-request{border:1px solid #dce9df;border-left:5px solid #d97706;border-radius:12px;padding:15px;margin-top:12px;background:#fffdf8}.cert-request-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}.cert-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(170px,1fr));gap:10px 14px;margin-top:13px}.cert-edit-grid label{display:block;font-size:11px;font-weight:800;color:#5d6d62}.cert-edit-grid input,.cert-edit-grid textarea{width:100%;margin-top:4px;padding:9px 10px;border:1px solid #ccd8cf;border-radius:8px;background:#fff}.cert-edit-grid textarea{min-height:72px;resize:vertical}.cert-edit-grid .full{grid-column:1/-1}.cert-file-box{margin-top:12px;padding:10px 12px;background:#f5f8f6;border-radius:9px;font-size:12px}.cert-review-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:13px}.cert-request small{color:#6a796f}@media(max-width:900px){.cert-edit-grid{grid-template-columns:1fr 1fr}}@media(max-width:650px){.cert-edit-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -18,13 +19,14 @@
     <section class="cardx"><h2>Comptes</h2><p>L’état en ligne est actualisé toutes les 10 minutes. Un utilisateur est considéré en ligne pendant 15 minutes après sa dernière activité.</p><div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Rôle</th><th>État</th><th>Dernière activité</th><th>Actions</th></tr></thead><tbody id="users-body"></tbody></table></div></section>
     <section class="cardx" id="production-activity" style="scroll-margin-top:24px"><h2>Suivi de l’activité de production</h2><p>Ajouts, modifications, photos et demandes de suppression effectués sur les boîtes de Petri, le mycélium liquide et le grain.</p><div class="activity-filters"><label>Mois<input id="activity-month" type="month"></label><label>Opérateur<select id="activity-user"><option value="">Tous les opérateurs</option></select></label><label>Module<select id="activity-module"><option value="">Tous les modules</option><option value="petri">Boîtes de Petri</option><option value="lc">Mycélium liquide</option><option value="grain">Mycélium sur grain</option></select></label><button class="btnx green" onclick="loadActivity(1)">Filtrer</button></div><div class="actions" style="margin-top:12px"><button class="btnx green" onclick="exportActivity('xlsx')">📊 Exporter Excel</button><button class="btnx red" onclick="exportActivity('pdf')">📄 Exporter PDF</button></div><div class="metrics"><div class="metric"><strong id="metric-actions">0</strong>actions au total</div><div class="metric"><strong id="metric-items">0</strong>éléments distincts</div><div class="metric"><strong id="metric-days">0</strong>jours actifs</div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Opérateur</th><th>Module</th><th>Élément travaillé</th><th>Jour cycle</th><th>Action</th></tr></thead><tbody id="activity-body"></tbody></table></div><div class="activity-pagination"><button id="activity-previous" class="btnx grey" type="button" onclick="changeActivityPage(-1)">← Précédent</button><span id="activity-page-status" class="activity-pagination-status">Page 1 sur 1</span><button id="activity-next" class="btnx green" type="button" onclick="changeActivityPage(1)">Suivant →</button></div></section>
     <section class="cardx" id="strain-creation-approvals" style="scroll-margin-top:24px"><h2>Demandes de création de souche externe <span id="strain-pending-count" class="pending-count">0</span></h2><p>Les demandes saisies par les opérateurs sont contrôlées ici avant création réelle dans l’inventaire.</p><div id="strain-requests"></div></section>
+    <section class="cardx" id="strain-certification-approvals" style="scroll-margin-top:24px"><h2>Demandes de certification des souches <span id="strain-cert-pending-count" class="pending-count">0</span></h2><p>L’administrateur peut vérifier et corriger tous les champs saisis par l’opérateur, conserver, remplacer ou retirer le PDF facultatif, puis approuver la certification. La référence du certificat reste obligatoire.</p><div id="strain-certification-requests"></div></section>
     <section class="cardx"><h2>Demandes de suppression <span id="pending-count" class="pending-count">0</span></h2><div id="requests"></div></section>
   </main>
   <script>
     let roles=[],users=[],activityPage=1,activityTotalPages=1;const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     async function api(path,options={}){const r=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'Erreur API');return data}
     const fmt=d=>d?new Date(d).toLocaleString('fr-FR'):'Jamais';
-    async function load(){[roles,users]=await Promise.all([api('/api/admin/roles'),api('/api/admin/users')]);document.getElementById('new-role').innerHTML=roles.map(r=>`<option value="${esc(r.code)}">${esc(r.name)}</option>`).join('');renderUsers();populateActivityUsers();await Promise.all([loadStrainRequests(),loadRequests(),loadActivity()])}
+    async function load(){[roles,users]=await Promise.all([api('/api/admin/roles'),api('/api/admin/users')]);document.getElementById('new-role').innerHTML=roles.map(r=>`<option value="${esc(r.code)}">${esc(r.name)}</option>`).join('');renderUsers();populateActivityUsers();await Promise.all([loadStrainRequests(),loadCertificationRequests(),loadRequests(),loadActivity()])}
     function populateActivityUsers(){const select=document.getElementById('activity-user'),current=select.value;select.innerHTML='<option value="">Tous les opérateurs</option>'+users.filter(u=>u.role==='operator'||u.role==='admin').map(u=>`<option value="${esc(u.id)}">${esc(u.username)} (${esc(u.role_name)})</option>`).join('');select.value=current}
     const actionLabels={added:'Ajout du suivi',modified:'Modification du suivi',photo_added:'Photo ajoutée',delete_requested:'Suppression demandée',photo_deleted:'Photo supprimée',delete_approved:'Suppression approuvée',delete_rejected:'Suppression refusée'};const moduleLabels={petri:'Boîte de Petri',lc:'Mycélium liquide',grain:'Mycélium sur grain'};
     async function loadActivity(page=activityPage){const month=document.getElementById('activity-month').value,user=document.getElementById('activity-user').value,moduleName=document.getElementById('activity-module').value;const q=new URLSearchParams({month,page:String(page)});if(user)q.set('user_id',user);if(moduleName)q.set('module',moduleName);const data=await api('/api/admin/production-activity?'+q.toString());document.getElementById('metric-actions').textContent=data.summary.total_actions||0;document.getElementById('metric-items').textContent=data.summary.distinct_items||0;document.getElementById('metric-days').textContent=data.summary.active_days||0;document.getElementById('activity-body').innerHTML=data.rows.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString('fr-FR'))}</td><td><strong>${esc(x.actor_name)}</strong><br><small>${esc(x.actor_role)}</small></td><td><span class="module-pill">${esc(moduleLabels[x.module]||x.module)}</span></td><td><strong>${esc(x.item_label)}</strong><br><small>ID ${esc(x.item_id)}</small></td><td>${x.day_index===null||x.day_index===undefined?'—':'J'+esc(x.day_index)}</td><td>${esc(actionLabels[x.action_type]||x.action_type)}</td></tr>`).join('')||'<tr><td colspan="6">Aucune activité pour ces filtres.</td></tr>';activityPage=data.pagination?.page||1;activityTotalPages=data.pagination?.total_pages||1;document.getElementById('activity-page-status').textContent=`Page ${activityPage} sur ${activityTotalPages}`;document.getElementById('activity-previous').disabled=!data.pagination?.has_previous;document.getElementById('activity-next').disabled=!data.pagination?.has_next}
@@ -55,6 +57,74 @@
         await loadStrainRequests();
       }catch(e){alert('❌ '+e.message)}
     }
+    async function loadCertificationRequests(){
+      const rows=await api('/api/strain-certification-requests');
+      const pending=Array.isArray(rows)?rows:[];
+      document.getElementById('strain-cert-pending-count').textContent=pending.length;
+      document.getElementById('strain-certification-requests').innerHTML=pending.map(x=>{
+        const p=x.payload||{};
+        const fileHtml=x.certificate_file_url
+          ? `<div class="cert-file-box"><strong>Document joint :</strong> <a href="${esc(x.certificate_file_url)}" target="_blank" rel="noopener">${esc(x.certificate_file_name||'Ouvrir le PDF')}</a><label style="margin-left:12px"><input type="checkbox" id="cert-remove-file-${x.id}"> Retirer ce fichier avant approbation</label></div>`
+          : '<div class="cert-file-box">Aucun PDF joint par l’opérateur. Le fichier est facultatif.</div>';
+        return `<div class="cert-request" id="cert-request-${x.id}">
+          <div class="cert-request-head"><div><strong>${esc(x.strain_code||'Souche')} — ${esc(x.strain_name||'')}</strong><br><small>${esc(x.strain_species||'')} · Demandée par <strong>${esc(x.requested_by_name||'Opérateur')}</strong> · ${esc(fmt(x.requested_at))}</small></div><span class="status offline">En attente</span></div>
+          <div class="cert-edit-grid">
+            <label>Référence certificat *<input id="cert-ref-${x.id}" value="${esc(p.certificate_ref||'')}" required></label>
+            <label>Certifié / contrôlé par<input id="cert-by-${x.id}" value="${esc(p.certified_by||'')}"></label>
+            <label>Statut contamination<input id="cert-cont-status-${x.id}" value="${esc(p.contamination_status||'')}"></label>
+            <label>Type contamination<input id="cert-cont-type-${x.id}" value="${esc(p.contamination_type||'')}"></label>
+            <label>Taux / vitesse de croissance<input type="number" step="0.01" id="cert-growth-${x.id}" value="${esc(p.growth_rate??'')}"></label>
+            <label>Jours de colonisation<input type="number" step="1" min="0" id="cert-days-${x.id}" value="${esc(p.colonization_days??'')}"></label>
+            <label>Morphologie<input id="cert-morph-${x.id}" value="${esc(p.morphology_status||'')}"></label>
+            <label class="full">Notes<textarea id="cert-notes-${x.id}">${esc(p.notes||'')}</textarea></label>
+            <label class="full">Remplacer / ajouter un PDF facultatif<input type="file" accept="application/pdf,.pdf" id="cert-file-${x.id}"></label>
+            <label class="full">Note de revue administrateur<textarea id="cert-review-note-${x.id}" placeholder="Optionnel"></textarea></label>
+          </div>
+          ${fileHtml}
+          <div class="cert-review-actions"><button class="btnx green" onclick="approveCertificationRequest(${x.id})">✅ Approuver et certifier</button><button class="btnx red" onclick="rejectCertificationRequest(${x.id})">Refuser et supprimer la demande</button></div>
+        </div>`;
+      }).join('')||'<div class="empty">Aucune demande de certification en attente.</div>';
+    }
+
+    async function approveCertificationRequest(id){
+      const ref=document.getElementById(`cert-ref-${id}`)?.value.trim();
+      if(!ref)return alert('La référence du certificat est obligatoire.');
+      if(!confirm('Approuver cette certification ? La souche sera marquée CERTIFIÉE et autorisée pour la production.'))return;
+
+      const fd=new FormData();
+      fd.append('certificate_ref',ref);
+      fd.append('certified_by',document.getElementById(`cert-by-${id}`)?.value.trim()||'');
+      fd.append('contamination_status',document.getElementById(`cert-cont-status-${id}`)?.value.trim()||'');
+      fd.append('contamination_type',document.getElementById(`cert-cont-type-${id}`)?.value.trim()||'');
+      fd.append('growth_rate',document.getElementById(`cert-growth-${id}`)?.value||'');
+      fd.append('colonization_days',document.getElementById(`cert-days-${id}`)?.value||'');
+      fd.append('morphology_status',document.getElementById(`cert-morph-${id}`)?.value.trim()||'');
+      fd.append('notes',document.getElementById(`cert-notes-${id}`)?.value.trim()||'');
+      fd.append('review_note',document.getElementById(`cert-review-note-${id}`)?.value.trim()||'');
+      fd.append('decision','PASS');
+      const remove=document.getElementById(`cert-remove-file-${id}`);
+      if(remove?.checked)fd.append('remove_certificate_file','true');
+      const file=document.getElementById(`cert-file-${id}`)?.files?.[0];
+      if(file)fd.append('certificate_pdf',file);
+
+      try{
+        const r=await fetch(`/api/strain-certification-requests/${id}/approve`,{method:'POST',credentials:'same-origin',body:fd});
+        const data=await r.json().catch(()=>({}));
+        if(!r.ok)throw new Error(data.error||'Approbation impossible');
+        alert(`✅ Souche ${data.strain?.code||''} certifiée et autorisée pour la production.`);
+        await loadCertificationRequests();
+      }catch(e){alert('❌ '+e.message)}
+    }
+
+    async function rejectCertificationRequest(id){
+      if(!confirm('Refuser cette certification ? La demande sera supprimée du registre et le PDF temporaire sera supprimé s’il existe.'))return;
+      try{
+        const result=await api(`/api/strain-certification-requests/${id}/reject`,{method:'POST',body:'{}'});
+        if(result.storage_warning)alert('Demande refusée, mais le fichier temporaire n’a pas pu être supprimé : '+result.storage_warning);
+        await loadCertificationRequests();
+      }catch(e){alert('❌ '+e.message)}
+    }
+
     async function loadRequests(){const rows=await api('/api/admin/photo-deletion-requests');const pending=rows.filter(x=>x.status==='pending');document.getElementById('pending-count').textContent=pending.length;document.getElementById('requests').innerHTML=pending.map(x=>`<div class="photo-request"><a href="${esc(x.photo_url)}" target="_blank"><img src="${esc(x.photo_url)}" alt="Photo à supprimer"></a><div><strong>${esc(x.photo_type.toUpperCase())} — photo #${esc(x.photo_record_id)}</strong><br>Demandée par ${esc(x.requested_by_name)}<br><small>${fmt(x.requested_at)}</small></div><div class="actions"><button class="btnx red" onclick="review(${x.id},'approve')">Approuver</button><button class="btnx grey" onclick="review(${x.id},'reject')">Refuser</button></div></div>`).join('')||'<div class="empty">Aucune demande en attente.</div>'}
     async function review(id,action){if(!confirm(action==='approve'?'Approuver et supprimer définitivement cette photo ?':'Refuser cette demande ?'))return;try{await api(`/api/admin/photo-deletion-requests/${id}/${action}`,{method:'POST',body:'{}'});await loadRequests()}catch(e){alert('❌ '+e.message)}}
     document.addEventListener('DOMContentLoaded',()=>{requireAdminAuth();document.getElementById('activity-month').value=new Date().toISOString().slice(0,7);load().catch(e=>alert('❌ '+e.message));setInterval(()=>load().catch(()=>{}),10*60*1000)});
