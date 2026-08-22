@@ -194,8 +194,8 @@
     const user=auth||window.mtdSession||{},isAdmin=user.role==='admin';
     const name=document.getElementById('mtd-shell-name'),role=document.getElementById('mtd-shell-role');
     if(name)name.textContent=user.username||'Utilisateur';if(role)role.textContent=isAdmin?'Administrateur':user.role==='operator'?'Opérateur':user.role==='visitor'?'Visiteur':'Lecture seule';
-    document.querySelectorAll('[data-mtd-admin-link]').forEach(el=>el.hidden=!isAdmin);
-    const bell=document.getElementById('mtd-shell-bell');if(bell){bell.hidden=!isAdmin;if(isAdmin)loadRequests()}
+    document.querySelectorAll('[data-mtd-admin-link]').forEach(el=>{el.hidden=!isAdmin;el.style.display=isAdmin?'':'none'});
+    const bell=document.getElementById('mtd-shell-bell');if(bell){bell.hidden=!isAdmin;bell.style.display=isAdmin?'':'none';if(isAdmin)loadRequests();else document.getElementById('mtd-shell-notifications')?.classList.remove('open')}
   }
 
   const init=()=>{build();applySession(window.mtdSession);setTimeout(()=>{applySession(window.mtdSession);cleanLegacyIcons()},320)};

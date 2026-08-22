@@ -64,6 +64,9 @@ body.mtd-dashboard-shell .rd-navbar-main-outer{display:none!important}
 .mtd-shell-brand img{width:48px;height:48px;object-fit:cover;border-radius:50%;background:#fff;border:2px solid rgba(255,255,255,.25);box-shadow:0 4px 14px rgba(0,0,0,.18)}
 .mtd-shell-brand strong{display:block;font:700 16px/1 'Outfit',Arial,sans-serif;letter-spacing:.025em}
 .mtd-shell-brand small{display:block;margin-top:5px;font-size:9px;font-weight:600;letter-spacing:.14em;color:#bdd6c5}
+
+/* Admin-only shell controls stay hidden for operator/viewer roles. */
+.mtd-shell-nav a[data-mtd-admin-link][hidden], .mtd-shell-icon[hidden], .mtd-shell-badge[hidden]{display:none!important}
 .mtd-shell-nav{display:grid;gap:5px}
 .mtd-shell-nav a{display:flex;align-items:center;gap:12px;min-height:43px;padding:10px 12px;border-radius:10px;color:#d9e9df!important;text-decoration:none!important;font:600 13px 'DM Sans',Arial,sans-serif;transition:background .16s,transform .16s,color .16s}
 .mtd-shell-nav a:hover{background:rgba(255,255,255,.07);color:#fff!important;transform:translateX(1px)}
