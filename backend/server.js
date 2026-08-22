@@ -4320,12 +4320,33 @@ app.post('/api/lc-workflow/lots', async (req, res) => {
 app.get('/api/lc-workflow/lots', async (req, res) => {
   try {
     await ensureLcPotWorkflowSchema();
+
+    // Optional DB-side filter used by the LC page. Keeping the parameter
+    // optional preserves compatibility with other callers that need all lots.
+    const sourcePetriRaw = req.query?.source_petri_id;
+    const sourcePetriId = sourcePetriRaw === undefined || sourcePetriRaw === null || String(sourcePetriRaw).trim() === ''
+      ? null
+      : Number(sourcePetriRaw);
+
+    if (sourcePetriId !== null && (!Number.isInteger(sourcePetriId) || sourcePetriId <= 0)) {
+      return res.status(400).json({ error: 'source_petri_id invalide' });
+    }
+
+    const params = [];
+    let sourceFilter = '';
+    if (sourcePetriId !== null) {
+      params.push(sourcePetriId);
+      sourceFilter = ` AND l.source_petri_id = $${params.length}`;
+    }
+
     const r = await pool.query(`
       SELECT l.id FROM lc_lots l
-      WHERE l.source_petri_id IS NOT NULL OR l.parent_iso_id IS NOT NULL
+      WHERE (l.source_petri_id IS NOT NULL OR l.parent_iso_id IS NOT NULL)
+        ${sourceFilter}
       ORDER BY COALESCE(l.j0_date, l.created_at::date) DESC, l.id DESC
       LIMIT 300
-    `);
+    `, params);
+
     let rows = [];
     for (const x of r.rows) rows.push(await lcLotWithComputedFields(x.id));
     res.json(rows.filter(Boolean));

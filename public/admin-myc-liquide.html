@@ -815,6 +815,8 @@
 .lc-lots-page-btn.secondary{background:#e5e9e6;color:#33423a;}
 .lc-lots-page-btn:disabled{opacity:.45;cursor:not-allowed;}
 .lc-lots-page-status{min-width:130px;text-align:center;color:var(--green-dark);font-size:12px;font-weight:900;}
+.lc-lots-filter-badge{display:inline-flex;align-items:center;margin-left:8px;padding:4px 9px;border-radius:999px;background:#edf3ef;color:#607067;font-size:11px;font-weight:900;vertical-align:middle;}
+.lc-lots-filter-badge.active{background:#dff5e8;color:#116b35;}
 .lc-lot-pots-loading td{background:#f8fff9!important;color:#52705e;font-weight:800;padding-left:42px!important;}
 
 /* === FORMULAIRE SUPPRESSION POT / LOT LC === */
@@ -1062,7 +1064,7 @@
       </div>
 
       <div class="admin-card">
-        <h4>📋 Lots LC créés</h4>
+        <h4>📋 Lots LC créés <span id="lc-lots-selected-p3" class="lc-lots-filter-badge">Sélectionnez un P3</span></h4>
         <table class="lots-table">
           <thead><tr><th>Lot</th><th>Source P3</th><th>Solution</th><th>Pots</th><th>J0</th><th>Jour</th><th>Actions</th></tr></thead>
           <tbody id="lc-lots-body"><tr><td colspan="7" style="text-align:center;">Chargement...</td></tr></tbody>
@@ -1127,7 +1129,7 @@
 <script>
 let API_BASE=window.location.origin;
 let selectedP3=null,p3Rows=[],solutions=[];
-let lcLotsCache=[],lcLotsPage=1,expandedLcLotId=null;
+let lcLotsCache=[],lcLotsPage=1,expandedLcLotId=null,lcLotsLoadToken=0;
 const LC_LOTS_PAGE_SIZE=10;
 const expandedLcPotsCache=new Map();
 let lcDeleteTarget=null,lcDeleteEvidenceFile=null,lcDeletePreviewUrl=null;
@@ -1277,13 +1279,24 @@ async function loadP3Ready(){
 }
 async function selectP3(id){
   selectedP3=p3Rows.find(x=>Number(x.petri_id)===Number(id));
+  if(!selectedP3)return;
   document.getElementById('alert-required').classList.remove('show');
   document.getElementById('alert-selected').classList.add('show');
   document.getElementById('selected-label').textContent=`P3-${selectedP3.petri_id} — ${selectedP3.iso_code} / ${selectedP3.champignon}`;
   ['btn-show-create-lc','btn-show-solution','btn-show-protocole'].forEach(id=>document.getElementById(id).disabled=false);
   document.getElementById('lc-p3-readonly').value=`P3-${selectedP3.petri_id} — ${selectedP3.iso_code}`;
   document.getElementById('solution-p3-readonly').value=`${selectedP3.iso_code} · ${selectedP3.champignon}`;
-  await loadSolutions(selectedP3.isolement_id);
+
+  // A P3 selection defines the LC lot context: reset pagination/expansion and
+  // load only lots whose source_petri_id matches this P3.
+  lcLotsPage=1;
+  expandedLcLotId=null;
+  expandedLcPotsCache.clear();
+
+  await Promise.all([
+    loadSolutions(selectedP3.isolement_id),
+    loadLots()
+  ]);
   await loadP3Ready();
 }
 async function loadSolutions(isoId){
@@ -2150,8 +2163,19 @@ function updateLcLotsPagination(){
 function renderLotsPage(){
   const tbody=document.getElementById('lc-lots-body');
   if(!tbody)return;
+  const filterBadge=document.getElementById('lc-lots-selected-p3');
+  const selectedP3Id=Number(selectedP3?.petri_id||0);
+  if(filterBadge){
+    filterBadge.textContent=selectedP3Id?`P3-${selectedP3Id}`:'Sélectionnez un P3';
+    filterBadge.classList.toggle('active',!!selectedP3Id);
+  }
+  if(!selectedP3Id){
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#607067;padding:22px;">Sélectionnez un P3 dans « Stock des P3 piquables » pour afficher uniquement ses lots LC.</td></tr>';
+    updateLcLotsPagination();
+    return;
+  }
   if(!lcLotsCache.length){
-    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;">Aucun lot LC créé.</td></tr>';
+    tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:22px;">Aucun lot LC créé depuis P3-${selectedP3Id}.</td></tr>`;
     updateLcLotsPagination();
     return;
   }
@@ -2185,14 +2209,37 @@ function renderLotsPage(){
 }
 async function loadLots(){
   const tbody=document.getElementById('lc-lots-body');
+  const sourceP3Id=Number(selectedP3?.petri_id||0);
+  const token=++lcLotsLoadToken;
+
+  // Lots LC are intentionally contextual. No P3 selected = no lot list.
+  if(!sourceP3Id){
+    lcLotsCache=[];
+    expandedLcPotsCache.clear();
+    expandedLcLotId=null;
+    lcLotsPage=1;
+    renderLotsPage();
+    return;
+  }
+
+  if(tbody){
+    tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;color:#607067;padding:22px;">Chargement des lots créés depuis P3-${sourceP3Id}...</td></tr>`;
+  }
+
   try{
-    const lots=await getJSON('/api/lc-workflow/lots');
-    lcLotsCache=Array.isArray(lots)?lots:[];
+    const lots=await getJSON(`/api/lc-workflow/lots?source_petri_id=${encodeURIComponent(sourceP3Id)}`);
+
+    // Ignore an older response if the user selected another P3 meanwhile.
+    if(token!==lcLotsLoadToken || Number(selectedP3?.petri_id||0)!==sourceP3Id)return;
+
+    lcLotsCache=(Array.isArray(lots)?lots:[]).filter(l=>Number(l.source_petri_id)===sourceP3Id);
     expandedLcPotsCache.clear();
     expandedLcLotId=null;
     if(lcLotsPage>lcLotsTotalPages())lcLotsPage=lcLotsTotalPages();
     renderLotsPage();
   }catch(e){
+    if(token!==lcLotsLoadToken)return;
+    lcLotsCache=[];
     if(tbody)tbody.innerHTML=`<tr><td colspan="7" style="text-align:center;color:#721c24;">${esc(e.message)}</td></tr>`;
     updateLcLotsPagination();
   }
