@@ -298,7 +298,7 @@
     if(!auth||auth.role==='visitor'||heartbeatTimer)return;
     const beat=()=>{if(document.visibilityState==='visible')fetch('/api/auth/heartbeat',{method:'POST',credentials:'same-origin',keepalive:true}).catch(()=>{});};
     beat();
-    heartbeatTimer=setInterval(beat,10*60*1000);
+    heartbeatTimer=setInterval(beat,60*60*1000);
   }
 
   window.isVisitorMode = function isVisitorMode() {

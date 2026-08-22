@@ -742,7 +742,7 @@ app.get('/api/admin/users', requirePermission('users.manage'), async (_req, res)
     const result = await realPool.query(`
       SELECT u.auth_user_id AS id,u.email,u.username,u.display_name,u.active,u.must_change_password,
              u.last_seen_at,u.created_at,r.code AS role,r.name AS role_name,
-             (u.active AND u.last_seen_at >= now()-interval '15 minutes') AS online
+             (u.active AND u.last_seen_at >= now()-interval '75 minutes') AS online
       FROM app_users u JOIN app_roles r ON r.id=u.role_id
       ORDER BY online DESC,lower(u.username)
     `);
@@ -909,7 +909,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
       isAdmin
         ? realPool.query(`
             SELECT count(*) FILTER (WHERE active)::int AS active,
-                   count(*) FILTER (WHERE active AND last_seen_at >= now()-interval '15 minutes')::int AS online,
+                   count(*) FILTER (WHERE active AND last_seen_at >= now()-interval '75 minutes')::int AS online,
                    count(*)::int AS total
             FROM app_users
           `)
