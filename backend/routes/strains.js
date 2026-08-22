@@ -965,6 +965,11 @@ router.delete('/strains/:id', async (req, res) => {
   }
 
   const { id } = req.params;
+  const safeCleanupTables = new Set([
+    'strain_certificates',
+    'strain_certification_requests',
+  ]);
+
   try {
     const existing = await req.db.query(
       `SELECT id,code,name,strain_type,status FROM strains WHERE id=$1::uuid`,
@@ -974,21 +979,113 @@ router.delete('/strains/:id', async (req, res) => {
       return res.status(404).json({ error: 'Souche non trouvée' });
     }
 
-    // Une suppression physique ne doit jamais effacer silencieusement l'historique
-    // via des FOREIGN KEY ON DELETE CASCADE. On bloque donc toute souche déjà utilisée.
+    // Les enregistrements de certification seuls ne constituent pas une utilisation
+    // en production : un administrateur peut supprimer la souche et ces traces de
+    // certification ensemble. Toute autre dépendance continue de bloquer la suppression.
     const dependencies = await getStrainDependencies(req.db, id);
-    if (dependencies.length) {
+    const blockingDependencies = dependencies.filter(
+      (dependency) => !safeCleanupTables.has(dependency.table)
+    );
+
+    if (blockingDependencies.length) {
       return res.status(409).json({
         error: 'Suppression impossible : cette souche est déjà liée à des données de production ou de traçabilité. Utilisez le statut ARCHIVED si vous souhaitez la retirer de l’inventaire actif.',
-        dependencies
+        dependencies: blockingDependencies
       });
     }
 
-    const deleted = await req.db.query(
-      `DELETE FROM strains WHERE id=$1::uuid RETURNING id,code,name`,
-      [id]
-    );
-    res.json({ success: true, message: 'Souche supprimée définitivement de la base de données.', strain: deleted.rows[0] });
+    const dependencyTables = new Set(dependencies.map((dependency) => dependency.table));
+    const client = await req.db.connect();
+    const certificateFiles = new Set();
+    let deletedStrain = null;
+
+    try {
+      await client.query('BEGIN');
+
+      // Récupérer les fichiers avant de supprimer les lignes. to_jsonb() permet de
+      // rester compatible avec l'ancien champ file_path et le nouveau champ pdf_path.
+      if (dependencyTables.has('strain_certification_requests')) {
+        const requestFiles = await client.query(
+          `SELECT certificate_file_url
+           FROM strain_certification_requests
+           WHERE strain_id=$1::uuid`,
+          [id]
+        );
+        for (const row of requestFiles.rows) {
+          if (row.certificate_file_url) certificateFiles.add(String(row.certificate_file_url));
+        }
+      }
+
+      if (dependencyTables.has('strain_certificates')) {
+        const certificateRows = await client.query(
+          `SELECT
+             COALESCE(
+               NULLIF(to_jsonb(sc)->>'pdf_path', ''),
+               NULLIF(to_jsonb(sc)->>'file_path', '')
+             ) AS certificate_file_url
+           FROM strain_certificates sc
+           WHERE sc.strain_id=$1::uuid`,
+          [id]
+        );
+        for (const row of certificateRows.rows) {
+          if (row.certificate_file_url) certificateFiles.add(String(row.certificate_file_url));
+        }
+      }
+
+      // Nettoyage explicite des seules dépendances considérées comme sûres.
+      // Cela évite de dépendre silencieusement de ON DELETE CASCADE.
+      if (dependencyTables.has('strain_certification_requests')) {
+        await client.query(
+          `DELETE FROM strain_certification_requests WHERE strain_id=$1::uuid`,
+          [id]
+        );
+      }
+      if (dependencyTables.has('strain_certificates')) {
+        await client.query(
+          `DELETE FROM strain_certificates WHERE strain_id=$1::uuid`,
+          [id]
+        );
+      }
+
+      const deleted = await client.query(
+        `DELETE FROM strains WHERE id=$1::uuid RETURNING id,code,name`,
+        [id]
+      );
+      if (!deleted.rows.length) {
+        throw new Error('Souche introuvable pendant la suppression.');
+      }
+      deletedStrain = deleted.rows[0];
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    // Supprimer les éventuels PDF de certification seulement après le COMMIT.
+    // Un même fichier peut être référencé par la demande et le certificat final :
+    // le Set évite donc une double suppression Supabase.
+    const storageWarnings = [];
+    for (const fileUrl of certificateFiles) {
+      try {
+        await deleteStoredFile(fileUrl, path.join(__dirname, '../..'));
+      } catch (error) {
+        console.warn('Certificat non supprimé du stockage:', error.message);
+        storageWarnings.push(error.message || String(error));
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Souche supprimée définitivement de la base de données.',
+      strain: deletedStrain,
+      cleaned_certification_records: dependencies
+        .filter((dependency) => safeCleanupTables.has(dependency.table))
+        .map((dependency) => ({ table: dependency.table, count: dependency.count })),
+      storage_warnings: storageWarnings,
+    });
   } catch (error) {
     console.error('Erreur DELETE /api/strains/:id:', error);
     if (error.code === '23503') {
