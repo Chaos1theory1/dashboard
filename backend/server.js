@@ -398,7 +398,10 @@ async function ensureUserManagementSchema() {
   const permissions = [
     ['users.manage','Gérer les utilisateurs'],['photo.upload','Ajouter des photos'],
     ['photo.edit','Modifier des photos'],['photo.delete.request','Demander une suppression'],
-    ['photo.delete.direct','Supprimer immédiatement'],['photo.delete.approve','Approuver les suppressions']
+    ['photo.delete.direct','Supprimer immédiatement'],['photo.delete.approve','Approuver les suppressions'],
+    ['lc.delete.request','Demander la suppression d’un pot ou lot LC'],
+    ['lc.delete.direct','Supprimer immédiatement un pot ou lot LC'],
+    ['lc.delete.approve','Approuver les suppressions LC']
   ];
   for (const [code, description] of permissions) await realPool.query(`INSERT INTO app_permissions(code,description) VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET description=EXCLUDED.description`, [code, description]);
   await realPool.query(`
@@ -406,7 +409,7 @@ async function ensureUserManagementSchema() {
     SELECT r.id,p.id FROM app_roles r CROSS JOIN app_permissions p WHERE r.code='admin'
     ON CONFLICT DO NOTHING;
     INSERT INTO app_role_permissions(role_id,permission_id)
-    SELECT r.id,p.id FROM app_roles r JOIN app_permissions p ON p.code IN ('photo.upload','photo.edit','photo.delete.request') WHERE r.code='operator'
+    SELECT r.id,p.id FROM app_roles r JOIN app_permissions p ON p.code IN ('photo.upload','photo.edit','photo.delete.request','lc.delete.request') WHERE r.code='operator'
     ON CONFLICT DO NOTHING;
   `);
   userManagementSchemaReady = true;
@@ -759,6 +762,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
   try {
     await ensureUserManagementSchema();
     await ensurePetriDeletionWorkflowSchema();
+    await ensureLcDeletionWorkflowSchema();
     await ensureIsoPetrisStorageSchema();
     await ensureLcPotWorkflowSchema();
     await ensureGrainWorkflowSchema();
@@ -916,7 +920,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
           `)
         : Promise.resolve({ rows: [{ active: 0, online: 0, total: 0 }] }),
       isAdmin
-        ? realPool.query(`SELECT ((SELECT count(*) FROM photo_deletion_requests WHERE status='pending') + (SELECT count(*) FROM petri_deletion_requests WHERE status='pending'))::int AS total`)
+        ? realPool.query(`SELECT ((SELECT count(*) FROM photo_deletion_requests WHERE status='pending') + (SELECT count(*) FROM petri_deletion_requests WHERE status='pending') + (SELECT count(*) FROM lc_deletion_requests WHERE status='pending'))::int AS total`)
         : Promise.resolve({ rows: [{ total: 0 }] })
     ]);
 
@@ -1581,6 +1585,503 @@ app.post('/api/admin/photo-deletion-requests/:id/approve', requirePermission('ph
   } finally { client.release(); }
 });
 
+
+
+// ============================================================
+// SUPPRESSION POTS / LOTS LC AVEC APPROBATION ET JUSTIFICATIF
+// Operateur: demande admin. Admin: suppression immediate.
+// Motif obligatoire pour tous; photo justificative facultative.
+// ============================================================
+const LC_DELETE_BUCKET = 'lc_issue_delete';
+let lcDeletionSchemaReady = false;
+let lcDeletionBucketReady = false;
+
+async function ensureLcDeletionWorkflowSchema() {
+  if (lcDeletionSchemaReady) return;
+  await realPool.query(`
+    CREATE TABLE IF NOT EXISTS lc_deletion_requests (
+      id BIGSERIAL PRIMARY KEY,
+      resource_type TEXT NOT NULL CHECK (resource_type IN ('pot','lot')),
+      lc_lot_id BIGINT,
+      lc_pot_id BIGINT,
+      lot_code TEXT,
+      pot_code TEXT,
+      reason TEXT NOT NULL,
+      evidence_path TEXT,
+      evidence_bucket TEXT NOT NULL DEFAULT 'lc_issue_delete',
+      evidence_mime_type TEXT,
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','cancelled')),
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by UUID,
+      reviewed_by_name TEXT,
+      reviewed_at TIMESTAMPTZ,
+      review_note TEXT
+    );
+    ALTER TABLE lc_deletion_requests ADD COLUMN IF NOT EXISTS evidence_bucket TEXT NOT NULL DEFAULT 'lc_issue_delete';
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_lc_deletion_pending_pot
+      ON lc_deletion_requests(lc_pot_id) WHERE status='pending' AND resource_type='pot';
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_lc_deletion_pending_lot
+      ON lc_deletion_requests(lc_lot_id) WHERE status='pending' AND resource_type='lot';
+    CREATE INDEX IF NOT EXISTS ix_lc_deletion_requests_requested_at
+      ON lc_deletion_requests(requested_at DESC);
+
+    CREATE TABLE IF NOT EXISTS lc_deletion_history (
+      id BIGSERIAL PRIMARY KEY,
+      request_id BIGINT,
+      resource_type TEXT NOT NULL CHECK (resource_type IN ('pot','lot')),
+      lc_lot_id BIGINT,
+      lc_pot_id BIGINT,
+      lot_code TEXT,
+      pot_code TEXT,
+      reason TEXT NOT NULL,
+      evidence_path TEXT,
+      evidence_bucket TEXT NOT NULL DEFAULT 'lc_issue_delete',
+      evidence_mime_type TEXT,
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      requested_at TIMESTAMPTZ,
+      approved_by UUID,
+      approved_by_name TEXT,
+      approved_at TIMESTAMPTZ,
+      deletion_mode TEXT NOT NULL CHECK (deletion_mode IN ('admin_direct','operator_approved')),
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      original_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE lc_deletion_history ADD COLUMN IF NOT EXISTS evidence_bucket TEXT NOT NULL DEFAULT 'lc_issue_delete';
+    ALTER TABLE lc_deletion_history ADD COLUMN IF NOT EXISTS original_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+    CREATE INDEX IF NOT EXISTS ix_lc_deletion_history_deleted_at
+      ON lc_deletion_history(deleted_at DESC);
+    CREATE INDEX IF NOT EXISTS ix_lc_deletion_history_lot_id
+      ON lc_deletion_history(lc_lot_id, deleted_at DESC);
+    CREATE INDEX IF NOT EXISTS ix_lc_deletion_history_pot_id
+      ON lc_deletion_history(lc_pot_id, deleted_at DESC);
+  `);
+  lcDeletionSchemaReady = true;
+}
+
+async function ensureLcDeletionBucket() {
+  if (lcDeletionBucketReady) return;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.getBucket(LC_DELETE_BUCKET);
+  if (!error && data) {
+    lcDeletionBucketReady = true;
+    return;
+  }
+  const { error: createError } = await supabase.storage.createBucket(LC_DELETE_BUCKET, {
+    public: false,
+    fileSizeLimit: 4 * 1024 * 1024,
+    allowedMimeTypes: ['image/jpeg','image/png','image/webp','image/avif','image/heic','image/heif']
+  });
+  if (createError && !/already exists|duplicate/i.test(String(createError.message || ''))) {
+    throw new Error(`Creation bucket ${LC_DELETE_BUCKET} impossible: ${createError.message}`);
+  }
+  lcDeletionBucketReady = true;
+}
+
+async function uploadLcDeletionEvidence(file, resourceType, resourceId) {
+  if (!file) return null;
+  await ensureLcDeletionBucket();
+  const safeType = resourceType === 'lot' ? 'lot' : 'pot';
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const token = crypto.randomBytes(5).toString('hex');
+  const objectPath = `${safeType}/${Number(resourceId)}/LCDELETE-${stamp}-${safeType.toUpperCase()}${Number(resourceId)}-${token}.avif`;
+  let buffer;
+  try {
+    buffer = await sharp(file.buffer)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .avif({ quality: 58, effort: 4 })
+      .toBuffer();
+  } catch (conversionError) {
+    throw new Error(`Image justificative illisible: ${conversionError.message}`);
+  }
+  const { error } = await getSupabaseAdmin().storage.from(LC_DELETE_BUCKET).upload(objectPath, buffer, {
+    contentType: 'image/avif',
+    cacheControl: '3600',
+    upsert: false
+  });
+  if (error) throw new Error(`Upload image justificative impossible: ${error.message}`);
+  return { path: objectPath, mimeType: 'image/avif' };
+}
+
+async function removeLcDeletionEvidence(objectPath) {
+  const safePath = String(objectPath || '').trim();
+  if (!safePath) return;
+  try {
+    await ensureLcDeletionBucket();
+    const { error } = await getSupabaseAdmin().storage.from(LC_DELETE_BUCKET).remove([safePath]);
+    if (error) throw error;
+  } catch (e) {
+    console.error('Suppression image justificative LC:', e.message || e);
+  }
+}
+
+async function signedLcDeletionEvidenceUrl(objectPath) {
+  const safePath = String(objectPath || '').trim();
+  if (!safePath) return null;
+  try {
+    await ensureLcDeletionBucket();
+    const { data, error } = await getSupabaseAdmin().storage.from(LC_DELETE_BUCKET).createSignedUrl(safePath, 60 * 60);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  } catch (e) {
+    console.error('URL signee image justificative LC:', e.message || e);
+    return null;
+  }
+}
+
+const lcDeletionEvidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: imageFileFilter
+});
+
+function lcDeletionResourceType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  return type === 'lot' || type === 'pot' ? type : '';
+}
+
+function lcPotDisplayCode(pot) {
+  return String(pot?.code || (pot?.lot_code ? `${pot.lot_code}-POT-${String(pot.pot_number || '').padStart(2, '0')}` : `Pot LC ${pot?.id || ''}`));
+}
+
+async function loadLcDeletionTarget(db, resourceType, resourceId, lock = false) {
+  const id = Number(resourceId);
+  if (!id) return null;
+  if (resourceType === 'pot') {
+    const found = await db.query(`
+      SELECT p.*, l.code AS lot_code, l.solution_id, l.source_petri_id, l.parent_iso_id,
+             l.j0_date AS lot_j0_date, l.volume_par_pot_ml AS lot_volume_par_pot_ml
+      FROM lc_pots p
+      JOIN lc_lots l ON l.id=p.lc_lot_id
+      WHERE p.id=$1
+      ${lock ? 'FOR UPDATE OF p' : ''}
+    `, [id]);
+    if (!found.rows.length) return null;
+    const row = found.rows[0];
+    return {
+      resourceType: 'pot',
+      resourceId: id,
+      lcLotId: Number(row.lc_lot_id),
+      lcPotId: id,
+      lotCode: String(row.lot_code || ''),
+      potCode: lcPotDisplayCode(row),
+      row
+    };
+  }
+  const found = await db.query(`SELECT * FROM lc_lots WHERE id=$1 ${lock ? 'FOR UPDATE' : ''}`, [id]);
+  if (!found.rows.length) return null;
+  const row = found.rows[0];
+  return {
+    resourceType: 'lot',
+    resourceId: id,
+    lcLotId: id,
+    lcPotId: null,
+    lotCode: String(row.code || `LC-${id}`),
+    potCode: null,
+    row
+  };
+}
+
+async function executeLcDeletion(client, target) {
+  if (target.resourceType === 'pot') {
+    const potId = Number(target.lcPotId);
+    const journals = await client.query(`SELECT count(*)::int AS total FROM lc_pot_journal WHERE lc_pot_id=$1`, [potId]);
+    const originalData = {
+      pot: target.row,
+      journal_count: Number(journals.rows[0]?.total || 0)
+    };
+    await client.query(`DELETE FROM lc_reference_day_images WHERE lc_pot_id=$1 OR journal_id IN (SELECT id FROM lc_pot_journal WHERE lc_pot_id=$1)`, [potId]);
+    await client.query(`DELETE FROM lc_pot_journal WHERE lc_pot_id=$1`, [potId]);
+    const deleted = await client.query(`DELETE FROM lc_pots WHERE id=$1 RETURNING id`, [potId]);
+    if (!deleted.rows.length) throw new Error('Pot LC introuvable ou deja supprime.');
+    return { deleted_id: potId, restored_solution_ml: 0, originalData };
+  }
+
+  const lotId = Number(target.lcLotId);
+  const pots = await client.query(`SELECT * FROM lc_pots WHERE lc_lot_id=$1 ORDER BY pot_number,id`, [lotId]);
+  const journals = await client.query(`SELECT count(*)::int AS total FROM lc_pot_journal WHERE lc_lot_id=$1`, [lotId]);
+  const originalData = {
+    lot: target.row,
+    pots: pots.rows,
+    journal_count: Number(journals.rows[0]?.total || 0)
+  };
+  const restoreMl = Number(target.row.total_pots || 0) * Number(target.row.volume_par_pot_ml || 0);
+  await client.query(`DELETE FROM lc_pot_journal WHERE lc_lot_id=$1`, [lotId]);
+  await client.query(`DELETE FROM lc_reference_day_images WHERE lc_lot_id=$1`, [lotId]);
+  await client.query(`DELETE FROM lc_pots WHERE lc_lot_id=$1`, [lotId]);
+  const deleted = await client.query(`DELETE FROM lc_lots WHERE id=$1 RETURNING id`, [lotId]);
+  if (!deleted.rows.length) throw new Error('Lot LC introuvable ou deja supprime.');
+  if (target.row.solution_id && restoreMl > 0) {
+    await client.query(`
+      UPDATE solution_nutritive
+         SET volume_final_ml = COALESCE(volume_final_ml,0) + $2
+       WHERE id=$1
+    `, [Number(target.row.solution_id), restoreMl]);
+  }
+  return { deleted_id: lotId, restored_solution_ml: restoreMl, originalData };
+}
+
+async function insertLcDeletionHistory(client, data) {
+  await client.query(`
+    INSERT INTO lc_deletion_history
+      (request_id,resource_type,lc_lot_id,lc_pot_id,lot_code,pot_code,reason,
+       evidence_path,evidence_bucket,evidence_mime_type,
+       requested_by,requested_by_name,requested_by_role,requested_at,
+       approved_by,approved_by_name,approved_at,deletion_mode,context_data,original_data)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb)
+  `, [
+    data.requestId || null,
+    data.target.resourceType,
+    data.target.lcLotId || null,
+    data.target.lcPotId || null,
+    data.target.lotCode || null,
+    data.target.potCode || null,
+    data.reason,
+    data.evidencePath || null,
+    LC_DELETE_BUCKET,
+    data.evidenceMimeType || null,
+    data.requestedBy || null,
+    data.requestedByName || 'Utilisateur',
+    data.requestedByRole || 'operator',
+    data.requestedAt || new Date(),
+    data.approvedBy || null,
+    data.approvedByName || null,
+    data.approvedAt || new Date(),
+    data.deletionMode,
+    JSON.stringify(data.contextData || {}),
+    JSON.stringify(data.originalData || {})
+  ]);
+}
+
+function lcDeletionActivity(target, actionType, details = {}) {
+  const itemId = target.resourceType === 'pot' ? target.lcPotId : target.lcLotId;
+  const itemLabel = target.resourceType === 'pot' ? target.potCode : target.lotCode;
+  return {
+    module: 'lc',
+    actionType,
+    itemId,
+    itemLabel: itemLabel || `LC ${target.resourceType} ${itemId}`,
+    details: { target: target.resourceType === 'pot' ? 'lc_pot' : 'lc_lot', ...details }
+  };
+}
+
+app.get('/api/admin/lc-deletion-requests', requirePermission('lc.delete.approve'), async (_req, res) => {
+  try {
+    await ensureLcDeletionWorkflowSchema();
+    const result = await realPool.query(`
+      SELECT * FROM lc_deletion_requests
+      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, requested_at DESC
+      LIMIT 300
+    `);
+    const rows = await Promise.all(result.rows.map(async row => ({
+      ...row,
+      evidence_url: row.evidence_path ? await signedLcDeletionEvidenceUrl(row.evidence_path) : null
+    })));
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/lc-deletion-requests/:id/reject', requirePermission('lc.delete.approve'), async (req, res) => {
+  try {
+    await ensureLcDeletionWorkflowSchema();
+    const result = await realPool.query(`
+      UPDATE lc_deletion_requests
+         SET status='rejected', reviewed_by=$2, reviewed_by_name=$3, reviewed_at=now(), review_note=$4
+       WHERE id=$1 AND status='pending'
+       RETURNING *
+    `, [Number(req.params.id), req.adminSession?.userId || null, req.adminSession?.username || 'Admin', String(req.body?.note || '')]);
+    if (!result.rows.length) return res.status(409).json({ error: 'Cette demande a deja ete traitee.' });
+    const row = result.rows[0];
+    const target = {
+      resourceType: row.resource_type,
+      lcLotId: row.lc_lot_id,
+      lcPotId: row.lc_pot_id,
+      lotCode: row.lot_code,
+      potCode: row.pot_code
+    };
+    if (row.evidence_path) {
+      await removeLcDeletionEvidence(row.evidence_path);
+      await realPool.query(`UPDATE lc_deletion_requests SET evidence_path=NULL,evidence_mime_type=NULL WHERE id=$1`, [row.id]);
+    }
+    await recordProductionActivity(req, lcDeletionActivity(target, 'delete_rejected', {
+      request_id: row.id,
+      reason: row.reason
+    }));
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/lc-deletion-requests/:id/approve', requirePermission('lc.delete.approve'), async (req, res) => {
+  const client = await realPool.connect();
+  try {
+    await ensureLcDeletionWorkflowSchema();
+    await ensureLcPotWorkflowSchema();
+    await client.query('BEGIN');
+    const locked = await client.query(`SELECT * FROM lc_deletion_requests WHERE id=$1 FOR UPDATE`, [Number(req.params.id)]);
+    if (!locked.rows.length || locked.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Cette demande a deja ete traitee.' });
+    }
+    const requestRow = locked.rows[0];
+    const resourceId = requestRow.resource_type === 'pot' ? requestRow.lc_pot_id : requestRow.lc_lot_id;
+    const target = await loadLcDeletionTarget(client, requestRow.resource_type, resourceId, true);
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Le pot ou lot LC n’existe plus.' });
+    }
+    const deletion = await executeLcDeletion(client, target);
+    const approvedAt = new Date();
+    await insertLcDeletionHistory(client, {
+      requestId: requestRow.id,
+      target,
+      reason: requestRow.reason,
+      evidencePath: requestRow.evidence_path,
+      evidenceMimeType: requestRow.evidence_mime_type,
+      requestedBy: requestRow.requested_by,
+      requestedByName: requestRow.requested_by_name,
+      requestedByRole: requestRow.requested_by_role,
+      requestedAt: requestRow.requested_at,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: req.adminSession?.username || 'Admin',
+      approvedAt,
+      deletionMode: 'operator_approved',
+      contextData: requestRow.context_data || {},
+      originalData: deletion.originalData
+    });
+    await client.query(`
+      UPDATE lc_deletion_requests
+         SET status='approved',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=$4,review_note=$5
+       WHERE id=$1
+    `, [requestRow.id, req.adminSession?.userId || null, req.adminSession?.username || 'Admin', approvedAt, String(req.body?.note || '')]);
+    await client.query('COMMIT');
+    await recordProductionActivity(req, lcDeletionActivity(target, 'delete_approved', {
+      request_id: requestRow.id,
+      reason: requestRow.reason,
+      restored_solution_ml: deletion.restored_solution_ml || 0
+    }));
+    res.json({ success: true, deleted_id: deletion.deleted_id, restored_solution_ml: deletion.restored_solution_ml || 0 });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/lc-deletion-requests', lcDeletionEvidenceUpload.single('evidence_photo'), async (req, res) => {
+  let uploadedEvidence = null;
+  try {
+    await ensureLcDeletionWorkflowSchema();
+    await ensureLcPotWorkflowSchema();
+    const role = String(req.adminSession?.role || '');
+    if (!['admin','operator'].includes(role)) return res.status(403).json({ error: 'Ce role ne peut pas supprimer un pot ou lot LC.' });
+    if (role === 'operator' && !hasPermission(req, 'lc.delete.request')) return res.status(403).json({ error: 'Permission de demande de suppression LC refusee.' });
+
+    const resourceType = lcDeletionResourceType(req.body?.resource_type);
+    const resourceId = Number(req.body?.resource_id);
+    const reason = String(req.body?.reason || '').trim();
+    if (!resourceType || !resourceId) return res.status(400).json({ error: 'Pot ou lot LC invalide.' });
+    if (reason.length < 3) return res.status(400).json({ error: 'Le motif de suppression est obligatoire.' });
+
+    const target = await loadLcDeletionTarget(pool, resourceType, resourceId, false);
+    if (!target) return res.status(404).json({ error: resourceType === 'pot' ? 'Pot LC introuvable.' : 'Lot LC introuvable.' });
+    const contextData = {
+      resource_type: resourceType,
+      lot_code: target.lotCode || null,
+      pot_code: target.potCode || null,
+      status_before: target.row.status || target.row.cycle_status || null,
+      source_petri_id: target.row.source_petri_id || null,
+      solution_id: target.row.solution_id || null
+    };
+
+    if (role === 'operator') {
+      const duplicateSql = resourceType === 'pot'
+        ? `SELECT id FROM lc_deletion_requests WHERE resource_type='pot' AND lc_pot_id=$1 AND status='pending' LIMIT 1`
+        : `SELECT id FROM lc_deletion_requests WHERE resource_type='lot' AND lc_lot_id=$1 AND status='pending' LIMIT 1`;
+      const duplicate = await realPool.query(duplicateSql, [resourceId]);
+      if (duplicate.rows.length) return res.status(409).json({ error: 'Une demande de suppression est deja en attente pour cet element LC.' });
+      if (req.file) uploadedEvidence = await uploadLcDeletionEvidence(req.file, resourceType, resourceId);
+      const created = await realPool.query(`
+        INSERT INTO lc_deletion_requests
+          (resource_type,lc_lot_id,lc_pot_id,lot_code,pot_code,reason,
+           evidence_path,evidence_bucket,evidence_mime_type,context_data,
+           requested_by,requested_by_name,requested_by_role)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
+        RETURNING *
+      `, [
+        resourceType, target.lcLotId || null, target.lcPotId || null, target.lotCode || null, target.potCode || null, reason,
+        uploadedEvidence?.path || null, LC_DELETE_BUCKET, uploadedEvidence?.mimeType || null, JSON.stringify(contextData),
+        req.adminSession?.userId || null, req.adminSession?.username || 'Operateur', role
+      ]);
+      await recordProductionActivity(req, lcDeletionActivity(target, 'delete_requested', {
+        request_id: created.rows[0].id,
+        reason,
+        evidence: Boolean(uploadedEvidence)
+      }));
+      return res.status(202).json({ success: true, pending: true, request_id: created.rows[0].id, message: 'Demande envoyee a un administrateur.' });
+    }
+
+    if (req.file) uploadedEvidence = await uploadLcDeletionEvidence(req.file, resourceType, resourceId);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const lockedTarget = await loadLcDeletionTarget(client, resourceType, resourceId, true);
+      if (!lockedTarget) {
+        await client.query('ROLLBACK');
+        if (uploadedEvidence?.path) await removeLcDeletionEvidence(uploadedEvidence.path);
+        return res.status(404).json({ error: resourceType === 'pot' ? 'Pot LC introuvable.' : 'Lot LC introuvable.' });
+      }
+      const deletion = await executeLcDeletion(client, lockedTarget);
+      const now = new Date();
+      await insertLcDeletionHistory(client, {
+        target: lockedTarget,
+        reason,
+        evidencePath: uploadedEvidence?.path || null,
+        evidenceMimeType: uploadedEvidence?.mimeType || null,
+        requestedBy: req.adminSession?.userId || null,
+        requestedByName: req.adminSession?.username || 'Admin',
+        requestedByRole: 'admin',
+        requestedAt: now,
+        approvedBy: req.adminSession?.userId || null,
+        approvedByName: req.adminSession?.username || 'Admin',
+        approvedAt: now,
+        deletionMode: 'admin_direct',
+        contextData,
+        originalData: deletion.originalData
+      });
+      const cancelSql = resourceType === 'pot'
+        ? `UPDATE lc_deletion_requests SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),review_note=COALESCE(NULLIF(review_note,''),'Suppression directe par administrateur') WHERE resource_type='pot' AND lc_pot_id=$1 AND status='pending'`
+        : `UPDATE lc_deletion_requests SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),review_note=COALESCE(NULLIF(review_note,''),'Suppression directe par administrateur') WHERE resource_type='lot' AND lc_lot_id=$1 AND status='pending'`;
+      await client.query(cancelSql, [resourceId, req.adminSession?.userId || null, req.adminSession?.username || 'Admin']);
+      await client.query('COMMIT');
+      await recordProductionActivity(req, lcDeletionActivity(lockedTarget, 'delete_approved', {
+        direct_admin: true,
+        reason,
+        evidence: Boolean(uploadedEvidence),
+        restored_solution_ml: deletion.restored_solution_ml || 0
+      }));
+      return res.json({ success: true, pending: false, deleted_id: deletion.deleted_id, restored_solution_ml: deletion.restored_solution_ml || 0 });
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      if (uploadedEvidence?.path) await removeLcDeletionEvidence(uploadedEvidence.path);
+      throw e;
+    } finally { client.release(); }
+  } catch (e) {
+    if (uploadedEvidence?.path && String(req.adminSession?.role || '') === 'operator') {
+      try {
+        const found = await realPool.query(`SELECT 1 FROM lc_deletion_requests WHERE evidence_path=$1 LIMIT 1`, [uploadedEvidence.path]);
+        if (!found.rows.length) await removeLcDeletionEvidence(uploadedEvidence.path);
+      } catch (_) {}
+    }
+    console.error('POST /api/lc-deletion-requests', e);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 // ============================================================
 // RÉFÉRENCES JOURNALIÈRES PAR GROUPE BIOLOGIQUE
@@ -3838,51 +4339,50 @@ app.get('/api/lc-workflow/lots', async (req, res) => {
 app.delete('/api/lc-workflow/lots/:id', async (req, res) => {
   const client = await pool.connect();
   try {
+    await ensureLcDeletionWorkflowSchema();
     await ensureLcPotWorkflowSchema();
-    let lotId = Number(req.params.id);
+    if (req.adminSession?.role !== 'admin' || !hasPermission(req, 'lc.delete.direct')) {
+      return res.status(403).json({ error: 'Seul un administrateur peut supprimer directement un lot LC.' });
+    }
+    const lotId = Number(req.params.id);
+    const reason = String(req.body?.reason || '').trim();
     if (!lotId) return res.status(400).json({ error: 'id lot LC invalide' });
-
+    if (reason.length < 3) return res.status(400).json({ error: 'Le motif de suppression est obligatoire.' });
     await client.query('BEGIN');
-
-    const lotRes = await client.query(
-      `SELECT id, code, solution_id, total_pots, volume_par_pot_ml
-       FROM lc_lots
-       WHERE id=$1
-       LIMIT 1`,
-      [lotId]
-    );
-
-    if (!lotRes.rows.length) {
+    const target = await loadLcDeletionTarget(client, 'lot', lotId, true);
+    if (!target) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Lot LC introuvable' });
     }
-
-    const lot = lotRes.rows[0];
-    let restoreMl = Number(lot.total_pots || 0) * Number(lot.volume_par_pot_ml || 0);
-
-    await client.query(`DELETE FROM lc_pot_journal WHERE lc_lot_id=$1`, [lotId]);
-    await client.query(`DELETE FROM lc_reference_day_images WHERE lc_lot_id=$1`, [lotId]);
-    await client.query(`DELETE FROM lc_pots WHERE lc_lot_id=$1`, [lotId]);
-    await client.query(`DELETE FROM lc_lots WHERE id=$1`, [lotId]);
-
-    if (lot.solution_id && restoreMl > 0) {
-      await client.query(
-        `UPDATE solution_nutritive
-         SET volume_final_ml = COALESCE(volume_final_ml, 0) + $2
-         WHERE id=$1`,
-        [Number(lot.solution_id), restoreMl]
-      );
-    }
-
+    const deletion = await executeLcDeletion(client, target);
+    const now = new Date();
+    await insertLcDeletionHistory(client, {
+      target,
+      reason,
+      requestedBy: req.adminSession?.userId || null,
+      requestedByName: req.adminSession?.username || 'Admin',
+      requestedByRole: 'admin',
+      requestedAt: now,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: req.adminSession?.username || 'Admin',
+      approvedAt: now,
+      deletionMode: 'admin_direct',
+      contextData: { legacy_delete_route: true },
+      originalData: deletion.originalData
+    });
     await client.query('COMMIT');
-    return res.json({ success: true, deleted_id: lotId, restored_solution_ml: restoreMl });
+    await recordProductionActivity(req, lcDeletionActivity(target, 'delete_approved', {
+      direct_admin: true,
+      legacy_delete_route: true,
+      reason,
+      restored_solution_ml: deletion.restored_solution_ml || 0
+    }));
+    return res.json({ success: true, deleted_id: lotId, restored_solution_ml: deletion.restored_solution_ml || 0 });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('DELETE /api/lc-workflow/lots/:id', e);
     return res.status(500).json({ error: e.message });
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 });
 
 app.get('/api/lc-workflow/lots/:id', async (req, res) => {
@@ -3963,21 +4463,53 @@ app.get('/api/lc-workflow/lots/:id/pots-status-today', async (req, res) => {
   }
 });
 
-// Suppression pot LC
+// Suppression pot LC - admin uniquement, motif obligatoire.
 app.delete('/api/lc-workflow/pots/:id', async (req, res) => {
+  const client = await pool.connect();
   try {
+    await ensureLcDeletionWorkflowSchema();
     await ensureLcPotWorkflowSchema();
-    let potId = Number(req.params.id);
+    if (req.adminSession?.role !== 'admin' || !hasPermission(req, 'lc.delete.direct')) {
+      return res.status(403).json({ error: 'Seul un administrateur peut supprimer directement un pot LC.' });
+    }
+    const potId = Number(req.params.id);
+    const reason = String(req.body?.reason || '').trim();
     if (!potId) return res.status(400).json({ error: 'id pot invalide' });
-
-    await pool.query(`DELETE FROM lc_pot_journal WHERE lc_pot_id=$1`, [potId]).catch(()=>{});
-    await pool.query(`DELETE FROM lc_pots WHERE id=$1`, [potId]);
-
-    res.json({ ok:true, deleted_id: potId });
+    if (reason.length < 3) return res.status(400).json({ error: 'Le motif de suppression est obligatoire.' });
+    await client.query('BEGIN');
+    const target = await loadLcDeletionTarget(client, 'pot', potId, true);
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pot LC introuvable' });
+    }
+    const deletion = await executeLcDeletion(client, target);
+    const now = new Date();
+    await insertLcDeletionHistory(client, {
+      target,
+      reason,
+      requestedBy: req.adminSession?.userId || null,
+      requestedByName: req.adminSession?.username || 'Admin',
+      requestedByRole: 'admin',
+      requestedAt: now,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: req.adminSession?.username || 'Admin',
+      approvedAt: now,
+      deletionMode: 'admin_direct',
+      contextData: { legacy_delete_route: true },
+      originalData: deletion.originalData
+    });
+    await client.query('COMMIT');
+    await recordProductionActivity(req, lcDeletionActivity(target, 'delete_approved', {
+      direct_admin: true,
+      legacy_delete_route: true,
+      reason
+    }));
+    res.json({ ok: true, deleted_id: potId });
   } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('DELETE /api/lc-workflow/pots/:id', e);
     res.status(500).json({ error: e.message || 'Erreur suppression pot LC' });
-  }
+  } finally { client.release(); }
 });
 
 app.get('/api/lc-workflow/lots/:id/pots', async (req, res) => {
