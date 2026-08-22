@@ -387,11 +387,125 @@
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
+    /* Sous-onglets de l'inventaire : souches internes / externes */
+    .inventory-type-tabs {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 5px;
+      margin: 4px 0 14px;
+      border: 1px solid #dce7df;
+      border-radius: 12px;
+      background: #f4f8f5;
+    }
+    .inventory-type-tab {
+      border: 0;
+      border-radius: 9px;
+      padding: 9px 14px;
+      background: transparent;
+      color: #506057;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+    }
+    .inventory-type-tab:hover { background: #e9f4ec; color: var(--baslyagro-green-dark); }
+    .inventory-type-tab.active {
+      background: #ffffff;
+      color: var(--baslyagro-green-dark);
+      box-shadow: 0 2px 8px rgba(31,122,65,.12);
+    }
+    .inventory-type-tab .inventory-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      margin-left: 6px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: #e4f4e9;
+      color: var(--baslyagro-green-dark);
+      font-size: 10px;
+      line-height: 1;
+    }
+    .inventory-type-tab.active .inventory-count {
+      background: var(--baslyagro-green);
+      color: #fff;
+    }
+
+    /* Formulaire LC inline : neutralise les styles absolus du template et garde un rendu lisible. */
+    #lcInlinePanel {
+      overflow: visible !important;
+    }
+    #lcInlinePanel form,
+    #lcInlinePanel .lc-inline-field,
+    #lcInlinePanel .lc-inline-grid {
+      position: static !important;
+    }
+    #lcInlinePanel .form-label {
+      position: static !important;
+      display: block !important;
+      transform: none !important;
+      margin: 0 0 7px 0 !important;
+      line-height: 1.35 !important;
+      color: #34443a !important;
+    }
+    .lc-inline-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 12px;
+    }
+    .lc-stock-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid #e2e9e4;
+      border-radius: 10px;
+      background: #f7f3ec;
+    }
+    .lc-stock-item {
+      min-width: 0;
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.72);
+    }
+    .lc-stock-item span {
+      display: block;
+      margin-bottom: 3px;
+      color: #68756d;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .lc-stock-item strong { color: #1f2f25; font-size: 14px; }
+    @media (max-width: 767px) {
+      .lc-inline-grid,
+      .lc-stock-summary { grid-template-columns: 1fr; }
+      .inventory-type-tabs { display: flex; width: 100%; }
+      .inventory-type-tab { flex: 1 1 190px; }
+    }
+
     /* Formulaires */
     .form-label {
+      position: static !important;
+      display: block !important;
+      transform: none !important;
+      top: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      left: auto !important;
+      width: auto !important;
+      height: auto !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      z-index: auto !important;
       font-weight: 700;
-      margin-bottom: 4px;
-      display: block;
+      margin: 0 0 6px 0 !important;
+      padding: 0 !important;
+      line-height: 1.35 !important;
       font-size: 13px;
       color: #555;
     }
@@ -593,6 +707,22 @@
       }
 
     </style>
+
+  <style id="strain-admin-modal-style">
+    .strain-admin-modal{position:fixed;inset:0;z-index:10050;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(8,25,15,.62);backdrop-filter:blur(3px)}
+    .strain-admin-modal.open{display:flex}
+    .strain-admin-modal-card{width:min(760px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.28);border:1px solid rgba(31,122,65,.15)}
+    .strain-admin-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 20px;border-bottom:1px solid #e7eee9}
+    .strain-admin-modal-head h4{margin:0;color:#1f7a41}
+    .strain-admin-modal-close{border:0;background:#eef5f0;border-radius:9px;width:36px;height:36px;font-size:20px;cursor:pointer;color:#33463a}
+    .strain-admin-modal-body{padding:18px 20px}
+    .strain-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .strain-edit-grid .full{grid-column:1/-1}
+    .strain-admin-modal-actions{display:flex;justify-content:flex-end;gap:9px;padding:0 20px 20px}
+    .btn-action.btn-blue{background:#1769ff;color:#fff}
+    .btn-action.btn-red{background:#c0392b;color:#fff}
+    @media(max-width:700px){.strain-edit-grid{grid-template-columns:1fr}}
+  </style>
 </head>
 
 <body>
@@ -602,7 +732,7 @@
       function resolveAuth() {
         if (typeof requireAdminAuth === "function") {
           const auth = requireAdminAuth();
-          if (auth) return { username: auth.username || "Admin" };
+          if (auth) return { username: auth.username || "Admin", role: auth.role || "operator" };
           return null;
         }
 
@@ -612,7 +742,7 @@
           window.location.href = "login-admin.html";
           return null;
         }
-        return { username: sessionStorage.getItem("adminUsername") || "Admin" };
+        return { username: sessionStorage.getItem("adminUsername") || "Admin", role: "admin" };
       }
 
       document.addEventListener("DOMContentLoaded", function () {
@@ -776,15 +906,24 @@
                ============================================ -->
           <div class="tabs-container">
             <button class="tab-button active" data-tab="tab-inventory">📦 Inventaire</button>
-            <button class="tab-button" data-tab="tab-external">➕ Souche externe</button>
-            <button class="tab-button" data-tab="tab-internal">🧪 Souche interne (P3)</button>
+            <button class="tab-button" data-tab="tab-external">➕ Création de Souche Externe</button>
+            <button class="tab-button" data-tab="tab-internal">🧪 Création de Souche Interne (P3)</button>
           </div>
 
           <!-- TAB 1: INVENTAIRE -->
           <div id="tab-inventory" class="tab-content active">
             <div class="admin-card">
               <h4>📦 Inventaire des souches</h4>
-              <p class="admin-card-subtitle">Liste de toutes les souches enregistrées.</p>
+              <p class="admin-card-subtitle">Consultez séparément les souches internes issues d'un P3 et les souches externes reçues d'un fournisseur.</p>
+
+              <div class="inventory-type-tabs" role="tablist" aria-label="Type de souche dans l'inventaire">
+                <button type="button" class="inventory-type-tab active" data-inventory-type="INTERNAL" role="tab" aria-selected="true">
+                  🧪 Souches internes <span class="inventory-count" id="inventory-internal-count">0</span>
+                </button>
+                <button type="button" class="inventory-type-tab" data-inventory-type="EXTERNAL" role="tab" aria-selected="false">
+                  📦 Souches externes <span class="inventory-count" id="inventory-external-count">0</span>
+                </button>
+              </div>
 
               <div class="table-responsive">
                 <table>
@@ -815,34 +954,36 @@
 </div>
 
 <div id="lcInlinePanel" class="admin-card" style="margin-top:15px; display:none;">
-  <h4>💧 Créer LC</h4>
-  <p class="admin-card-subtitle">Petit formulaire (entiers). Stock solution : avant / après.</p>
+  <h4>💧 Créer un lot de mycélium liquide (LC)</h4>
+  <p class="admin-card-subtitle">Utilisez la souche interne sélectionnée pour créer les pots LC. Le stock de solution nutritive est calculé automatiquement avant et après la création.</p>
 
-  <div id="lcInlineHint" style="margin-bottom:10px; color:#555;"></div>
+  <div id="lcInlineHint" style="margin-bottom:12px; color:#555;"></div>
 
   <form id="formCreateLCInline">
-    <label class="form-label">Solution nutritive *</label>
-    <select class="form-select" id="lcSolutionSelect" required><option value="">Chargement...</option></select>
+    <div class="lc-inline-field">
+      <label class="form-label" for="lcSolutionSelect">Solution nutritive à utiliser *</label>
+      <select class="form-select" id="lcSolutionSelect" required><option value="">Chargement...</option></select>
+    </div>
 
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
-      <div>
-        <label class="form-label">Nombre de pots *</label>
+    <div class="lc-inline-grid">
+      <div class="lc-inline-field">
+        <label class="form-label" for="lcTotalPots">Nombre de pots LC à créer *</label>
         <input type="number" class="form-input" id="lcTotalPots" min="1" step="1" value="6" required />
       </div>
-      <div>
-        <label class="form-label">Volume / pot (ml) *</label>
+      <div class="lc-inline-field">
+        <label class="form-label" for="lcVolumePerPot">Volume de solution par pot (mL) *</label>
         <input type="number" class="form-input" id="lcVolumePerPot" min="1" step="1" value="700" required />
       </div>
     </div>
 
-    <div style="margin-top:12px; padding:12px; border:1px solid #eee; border-radius:10px; background:#f7f3ec;">
-      <div>Disponible (avant): <strong id="lcBeforeMl">—</strong> ml</div>
-      <div>Utilisé (LC): <strong id="lcUsedMl">—</strong> ml</div>
-      <div>Restant (après): <strong id="lcAfterMl">—</strong> ml</div>
+    <div class="lc-stock-summary" aria-label="Calcul du stock de solution nutritive">
+      <div class="lc-stock-item"><span>Stock disponible avant création</span><strong id="lcBeforeMl">—</strong> mL</div>
+      <div class="lc-stock-item"><span>Volume total utilisé pour les pots LC</span><strong id="lcUsedMl">—</strong> mL</div>
+      <div class="lc-stock-item"><span>Stock restant après création</span><strong id="lcAfterMl">—</strong> mL</div>
     </div>
 
     <div class="action-buttons" style="margin-top:12px;">
-      <button id="btnSubmitLCInline" type="submit" class="btn-action btn-green">✅ Créer LC</button>
+      <button id="btnSubmitLCInline" type="submit" class="btn-action btn-green">✅ Créer le lot LC</button>
     </div>
   </form>
 
@@ -855,8 +996,8 @@
           <!-- TAB 2: SOUCHE EXTERNE -->
           <div id="tab-external" class="tab-content">
             <div class="admin-card">
-              <h4>➕ Ajouter une souche externe (fournisseur)</h4>
-              <p class="admin-card-subtitle">Enregistrer une souche reçue d'un fournisseur.</p>
+              <h4>➕ Création de Souche Externe</h4>
+              <p class="admin-card-subtitle">Saisissez les informations de la souche reçue d'un fournisseur.</p>
 
               <form id="form-new-external">
                 <label class="form-label">Code souche *</label>
@@ -889,8 +1030,10 @@
                 <label class="form-label">Notes</label>
                 <textarea class="form-textarea" id="external-notes" placeholder="Informations complémentaires..."></textarea>
 
+                <div id="external-approval-note" style="margin:12px 0;padding:11px 13px;border-radius:10px;background:#eef8f1;border-left:4px solid #2fa35a;color:#315b3e;font-size:12px;line-height:1.45;"></div>
+
                 <div class="action-buttons">
-                  <button type="submit" class="btn-action btn-green">✅ Enregistrer la souche</button>
+                  <button id="btn-create-external" type="submit" class="btn-action btn-green">✅ Enregistrer la souche</button>
                   <button type="button" class="btn-action btn-grey" onclick="document.getElementById('form-new-external').reset()">Réinitialiser</button>
                 </div>
               </form>
@@ -901,8 +1044,8 @@
           <div id="tab-internal" class="tab-content">
             <!-- Liste P3 validés -->
             <div id="p3-list-container" class="admin-card">
-              <h4>🧪 Créer une souche interne depuis un P3 validé</h4>
-              <p class="admin-card-subtitle">Sélectionnez une boîte P3 validée pour créer une souche interne.</p>
+              <h4>🧪 Création de Souche Interne (P3)</h4>
+              <p class="admin-card-subtitle">Sélectionnez une boîte P3 validée pour créer une nouvelle souche interne.</p>
 
               <small style="display:block;margin-bottom:8px;color:#777;font-size:12px;">
                 💡 Astuce : faites glisser horizontalement la table pour voir toutes les colonnes ▶️
@@ -1006,8 +1149,74 @@
     </div>
   </section>
 
+  <div id="strain-edit-modal" class="strain-admin-modal" aria-hidden="true">
+    <div class="strain-admin-modal-card" role="dialog" aria-modal="true" aria-labelledby="strain-edit-title">
+      <div class="strain-admin-modal-head">
+        <h4 id="strain-edit-title">Modifier la souche</h4>
+        <button type="button" class="strain-admin-modal-close" onclick="closeEditStrainModal()" aria-label="Fermer">×</button>
+      </div>
+      <div class="strain-admin-modal-body">
+        <input type="hidden" id="edit-strain-id">
+        <div class="strain-edit-grid">
+          <div><label class="form-label">Code *</label><input class="form-input" id="edit-strain-code" required></div>
+          <div><label class="form-label">Type</label><input class="form-input" id="edit-strain-type" readonly></div>
+          <div><label class="form-label">Nom *</label><input class="form-input" id="edit-strain-name" required></div>
+          <div><label class="form-label">Espèce *</label><input class="form-input" id="edit-strain-species" required></div>
+          <div><label class="form-label">Fournisseur / source</label><input class="form-input" id="edit-strain-source-name"></div>
+          <div><label class="form-label">Référence source / certificat</label><input class="form-input" id="edit-strain-source-ref"></div>
+          <div><label class="form-label">Quantité</label><input type="number" step="0.01" class="form-input" id="edit-strain-quantity"></div>
+          <div><label class="form-label">Unité</label><select class="form-select" id="edit-strain-unit"><option value="mL">mL</option><option value="L">L</option><option value="g">g</option><option value="kg">kg</option><option value="unit">unité</option></select></div>
+          <div><label class="form-label">Date création</label><input type="date" class="form-input" id="edit-strain-created-on"></div>
+          <div><label class="form-label">Date réception</label><input type="date" class="form-input" id="edit-strain-received-on"></div>
+          <div><label class="form-label">Date fabrication</label><input type="date" class="form-input" id="edit-strain-manufactured-on"></div>
+          <div><label class="form-label">Date expiration</label><input type="date" class="form-input" id="edit-strain-expiry-on"></div>
+          <div><label class="form-label">Température stockage °C</label><input type="number" step="0.1" class="form-input" id="edit-strain-storage-temp"></div>
+          <div><label class="form-label">Emplacement stockage</label><input class="form-input" id="edit-strain-storage-location"></div>
+          <div class="full"><label class="form-label">Notes</label><textarea class="form-textarea" id="edit-strain-notes"></textarea></div>
+        </div>
+        <div id="edit-strain-security-note" style="margin-top:12px;padding:10px 12px;border-radius:9px;background:#fff8e8;color:#7a5700;font-size:12px;">Le statut de certification et l’autorisation de production ne sont pas modifiés par ce formulaire.</div>
+      </div>
+      <div class="strain-admin-modal-actions">
+        <button type="button" class="btn-action btn-grey" onclick="closeEditStrainModal()">Annuler</button>
+        <button type="button" class="btn-action btn-blue" onclick="saveStrainEdits()">💾 Enregistrer les modifications</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = window.location.origin;
+
+
+    let inventoryStrains = [];
+    let activeInventoryType = 'INTERNAL';
+
+    function getCurrentAuth() {
+      try {
+        if (typeof requireAdminAuth === 'function') return requireAdminAuth();
+      } catch (_) {}
+      return { username: 'Admin', role: 'admin' };
+    }
+
+    function currentUserIsAdmin() {
+      return String(getCurrentAuth()?.role || '').toLowerCase() === 'admin';
+    }
+
+    function dateInputValue(value) {
+      if (!value) return '';
+      const text = String(value);
+      const m = text.match(/^(\d{4}-\d{2}-\d{2})/);
+      return m ? m[1] : '';
+    }
+
+    function setExternalCreationRoleUi() {
+      const isAdmin = currentUserIsAdmin();
+      const button = document.getElementById('btn-create-external');
+      const note = document.getElementById('external-approval-note');
+      if (button) button.textContent = isAdmin ? '✅ Créer la souche externe' : '📨 Envoyer pour approbation';
+      if (note) note.textContent = isAdmin
+        ? 'Administrateur : la création est effectuée directement. La présence d’une référence de certificat ne certifie pas automatiquement la souche.'
+        : 'Opérateur : vous pouvez saisir toutes les informations. La souche ne sera ajoutée à l’inventaire qu’après approbation d’un administrateur.';
+    }
 
     function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
       const controller = new AbortController();
@@ -1030,6 +1239,7 @@ let currentCycle = null;
     // CHARGEMENT AU DÉMARRAGE
     // ============================================
     document.addEventListener('DOMContentLoaded', async () => {
+      setExternalCreationRoleUi();
       // Charger les données du planning
       await loadPlanningData();
 
@@ -1049,8 +1259,9 @@ let currentCycle = null;
       await loadLCEnCours();
 
 
-      // Gérer les onglets
+      // Gérer les onglets principaux + les sous-onglets de l'inventaire
       setupTabs();
+      setupInventoryTypeTabs();
 
       // Formulaire LC inline
       const lcForm = document.getElementById('formCreateLCInline');
@@ -1271,6 +1482,31 @@ let currentCycle = null;
       });
     }
 
+    function activateInventoryType(nextType) {
+      nextType = String(nextType || '').toUpperCase();
+      if (!['INTERNAL', 'EXTERNAL'].includes(nextType)) return;
+      activeInventoryType = nextType;
+      document.querySelectorAll('.inventory-type-tab').forEach(btn => {
+        const active = String(btn.dataset.inventoryType || '').toUpperCase() === activeInventoryType;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      if (selectedStrain && String(selectedStrain.strain_type || '').toUpperCase() !== activeInventoryType) {
+        selectedStrain = null;
+        const selectedLabel = document.getElementById('selectedStrainLabel');
+        if (selectedLabel) selectedLabel.textContent = 'Aucune';
+        const lcPanel = document.getElementById('lcInlinePanel');
+        if (lcPanel) lcPanel.style.display = 'none';
+      }
+      renderStrainsInventory();
+    }
+
+    function setupInventoryTypeTabs() {
+      document.querySelectorAll('.inventory-type-tab').forEach(btn => {
+        btn.addEventListener('click', () => activateInventoryType(btn.dataset.inventoryType));
+      });
+    }
+
     // ============================================
     // INVENTAIRE (TAB 1)
     // ============================================
@@ -1279,68 +1515,79 @@ let currentCycle = null;
         const res = await fetch(`${API_BASE}/api/strains`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const strains = await res.json();
-
-        const tbody = document.getElementById('strains-tbody');
-
-        if (!Array.isArray(strains) || strains.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Aucune souche enregistrée</td></tr>';
-          return;
-        }
-
-    selectedStrain = null;
-
-tbody.innerHTML = strains.map(s => `
-  <tr data-strain-id="${s.id}" style="cursor:pointer;">
-    <td><strong>${s.code}</strong></td>
-    <td>${s.name || '—'}</td>
-    <td>${s.species || '—'}</td>
-    <td>${s.strain_type === 'INTERNAL' ? '🧪 Interne' : '📦 Externe'}</td>
-    <td>${s.quantity ? s.quantity + ' ' + (s.unit || '') : '—'}</td>
-    <td>${s.production_allowed ? '✅ Autorisée' : '⏳ Non autorisée'}</td>
-    <td>${s.created_on ? new Date(s.created_on).toLocaleDateString('fr-FR') : '—'}</td>
-    <td>${s.expiry_on ? new Date(s.expiry_on).toLocaleDateString('fr-FR') : '—'}</td>
-    <td>
-      ${s.certification_status === 'CERTIFIED' 
-        ? '✅ Certifiée' 
-        : (s.certification_status === 'PENDING_REVIEW' ? '⏳ En cours' : '❌ Non certifiée')
-      }
-    </td>
-    <td>
-      ${s.certification_status !== 'CERTIFIED' 
-        ? `<button class="btn-action btn-orange" style="padding:6px 10px;font-size:11px;"
-             onclick="event.stopPropagation(); openCertifyModal('${s.id}', '${String(s.code||'').replace(/'/g,"\\'")}', '${String(s.name||'').replace(/'/g,"\\'")}')">
-             📄 Certifier
-           </button>`
-        : '—'
-      }
-    </td>
-  </tr>
-`).join('');
-
-// 🔹 rendre les lignes sélectionnables
-document.querySelectorAll('#strains-tbody tr[data-strain-id]').forEach(tr => {
-  tr.addEventListener('click', () => {
-    const id = tr.getAttribute('data-strain-id');
-    const strain = strains.find(x => String(x.id) === String(id));
-    if (!strain) return;
-
-    selectedStrain = strain;
-    document.getElementById('selectedStrainLabel').textContent =
-      `${strain.code} (${strain.species || '—'})`;
-    // Initialiser le petit formulaire LC
-    initLcInlineForStrain(strain);
-
-    // surlignage visuel
-    document.querySelectorAll('#strains-tbody tr').forEach(r => r.classList.remove('selected-row'));
-    tr.classList.add('selected-row');
-  });
-});
-
+        inventoryStrains = Array.isArray(strains) ? strains : [];
+        updateInventoryCounts();
+        renderStrainsInventory();
       } catch (err) {
         console.error('Erreur chargement souches:', err);
-        document.getElementById('strains-tbody').innerHTML =
-          '<tr><td colspan="10" style="text-align:center; color: #c0392b;">Erreur de chargement</td></tr>';
+        inventoryStrains = [];
+        updateInventoryCounts();
+        const tbody = document.getElementById('strains-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#c0392b;">Erreur de chargement</td></tr>';
       }
+    }
+
+    function updateInventoryCounts() {
+      const internalCount = inventoryStrains.filter(s => String(s.strain_type || '').toUpperCase() === 'INTERNAL').length;
+      const externalCount = inventoryStrains.filter(s => String(s.strain_type || '').toUpperCase() === 'EXTERNAL').length;
+      const internalEl = document.getElementById('inventory-internal-count');
+      const externalEl = document.getElementById('inventory-external-count');
+      if (internalEl) internalEl.textContent = String(internalCount);
+      if (externalEl) externalEl.textContent = String(externalCount);
+    }
+
+    function renderStrainsInventory() {
+      const tbody = document.getElementById('strains-tbody');
+      if (!tbody) return;
+
+      const strains = inventoryStrains.filter(s => String(s.strain_type || '').toUpperCase() === activeInventoryType);
+      if (!strains.length) {
+        const label = activeInventoryType === 'INTERNAL' ? 'interne' : 'externe';
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#6b776f;">Aucune souche ${label} enregistrée</td></tr>`;
+        return;
+      }
+
+      const isAdmin = currentUserIsAdmin();
+      tbody.innerHTML = strains.map(s => {
+        const certificationAction = s.certification_status !== 'CERTIFIED'
+          ? `<button class="btn-action btn-orange" style="padding:6px 10px;font-size:11px;"
+               onclick="event.stopPropagation(); openCertifyModal('${s.id}', '${String(s.code||'').replace(/'/g,"\\'")}', '${String(s.name||'').replace(/'/g,"\\'")}')">
+               📄 Certifier
+             </button>`
+          : '';
+        const adminActions = isAdmin
+          ? `<button class="btn-action btn-blue" style="padding:6px 10px;font-size:11px;" onclick="event.stopPropagation(); openEditStrainModal('${s.id}')">✏️ Modifier</button>
+             <button class="btn-action btn-red" style="padding:6px 10px;font-size:11px;" onclick="event.stopPropagation(); deleteStrainAdmin('${s.id}')">🗑️ Supprimer</button>`
+          : '';
+        const actions = [adminActions, certificationAction].filter(Boolean).join(' ');
+        return `
+          <tr data-strain-id="${s.id}" style="cursor:pointer;">
+            <td><strong>${s.code}</strong></td>
+            <td>${s.name || '—'}</td>
+            <td>${s.species || '—'}</td>
+            <td>${s.strain_type === 'INTERNAL' ? '🧪 Interne' : '📦 Externe'}</td>
+            <td>${s.quantity ? s.quantity + ' ' + (s.unit || '') : '—'}</td>
+            <td>${s.production_allowed ? '✅ Autorisée' : '⏳ Non autorisée'}</td>
+            <td>${s.created_on ? new Date(s.created_on).toLocaleDateString('fr-FR') : '—'}</td>
+            <td>${s.expiry_on ? new Date(s.expiry_on).toLocaleDateString('fr-FR') : '—'}</td>
+            <td>${s.certification_status === 'CERTIFIED' ? '✅ Certifiée' : (s.certification_status === 'PENDING_REVIEW' ? '⏳ En cours' : '❌ Non certifiée')}</td>
+            <td><div class="action-buttons" style="gap:5px;">${actions || '—'}</div></td>
+          </tr>`;
+      }).join('');
+
+      document.querySelectorAll('#strains-tbody tr[data-strain-id]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const id = tr.getAttribute('data-strain-id');
+          const strain = inventoryStrains.find(x => String(x.id) === String(id));
+          if (!strain) return;
+          selectedStrain = strain;
+          const selectedLabel = document.getElementById('selectedStrainLabel');
+          if (selectedLabel) selectedLabel.textContent = `${strain.code} (${strain.species || '—'})`;
+          initLcInlineForStrain(strain);
+          document.querySelectorAll('#strains-tbody tr').forEach(r => r.classList.remove('selected-row'));
+          tr.classList.add('selected-row');
+        });
+      });
     }
 
     // ============================================
@@ -1363,7 +1610,7 @@ document.querySelectorAll('#strains-tbody tr[data-strain-id]').forEach(tr => {
 
       // Bloquer les souches externes
       if ((strain.strain_type || '').toUpperCase() !== 'INTERNAL') {
-        hint.innerHTML = '<span style="color:#c0392b;">LC : uniquement pour souches internes (issues d\'un P3).</span>';
+        hint.innerHTML = '<span style="color:#c0392b;">La création LC depuis cet écran est disponible uniquement pour les souches internes issues d\'un P3.</span>';
         sel.innerHTML = '<option value="">—</option>';
         btn.disabled = true;
         setLcCalc(null);
@@ -1383,7 +1630,7 @@ document.querySelectorAll('#strains-tbody tr[data-strain-id]').forEach(tr => {
         lcSolutionsCache = Array.isArray(data?.solutions) ? data.solutions : [];
 
         if (lcSolutionsCache.length === 0) {
-          hint.innerHTML = '<span style="color:#c0392b;">Aucune solution nutritive trouvée. Créez d\'abord une solution pour l\'isolement, puis revenez ici.</span>';
+          hint.innerHTML = '<span style="color:#c0392b;">Aucune solution nutritive disponible pour cette souche. Créez d\'abord une solution liée à l\'isolement d\'origine, puis revenez ici.</span>';
           sel.innerHTML = '<option value="">Aucune solution</option>';
           btn.disabled = true;
           setLcCalc(null);
@@ -1400,7 +1647,7 @@ document.querySelectorAll('#strains-tbody tr[data-strain-id]').forEach(tr => {
         sel.innerHTML = optionsHtml;
         sel.selectedIndex = 0;
 
-        hint.innerHTML = `<span style="color:#2fa35a;">✅ ${lcSolutionsCache.length} solution(s) disponible(s). Saisis les paramètres LC.</span>`;
+        hint.innerHTML = `<span style="color:#2fa35a;">✅ ${lcSolutionsCache.length} solution(s) nutritive(s) disponible(s). Renseignez le nombre de pots et le volume par pot.</span>`;
         btn.disabled = false;
 
         sel.onchange = updateLcCalc;
@@ -1787,20 +2034,22 @@ Entrez le numéro :`, '1');
     document.getElementById('form-new-external').addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      const certRef = document.getElementById('external-certificate').value;
+      const certRef = document.getElementById('external-certificate').value.trim();
       const data = {
-        code: document.getElementById('external-code').value,
-        name: document.getElementById('external-name').value,
-        species: document.getElementById('external-species').value,
+        code: document.getElementById('external-code').value.trim(),
+        name: document.getElementById('external-name').value.trim(),
+        species: document.getElementById('external-species').value.trim(),
         strain_type: 'EXTERNAL',
-        source_name: document.getElementById('external-supplier').value,
-        quantity: parseFloat(document.getElementById('external-quantity').value),
+        source_name: document.getElementById('external-supplier').value.trim(),
+        source_ref: certRef || null,
+        quantity: document.getElementById('external-quantity').value ? parseFloat(document.getElementById('external-quantity').value) : null,
         unit: document.getElementById('external-unit').value,
         notes: document.getElementById('external-notes').value,
         received_on: new Date().toISOString().split('T')[0],
-        certificate_available: certRef ? true : false,
-        certification_status: certRef ? 'CERTIFIED' : 'NOT_CERTIFIED',
-        production_allowed: certRef ? true : false
+        certificate_available: Boolean(certRef),
+        // Important : une référence de certificat ne certifie jamais automatiquement la souche.
+        certification_status: 'NOT_CERTIFIED',
+        production_allowed: false
       };
 
       try {
@@ -1809,16 +2058,25 @@ Entrez le numéro :`, '1');
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
+        const result = await res.json().catch(() => ({}));
+
+        if (res.ok && result.pending) {
+          alert('📨 Demande envoyée à un administrateur. La souche apparaîtra dans l’inventaire après approbation.');
+          document.getElementById('form-new-external').reset();
+          setExternalCreationRoleUi();
+          return;
+        }
 
         if (res.ok) {
-          alert('✅ Souche externe enregistrée avec succès !');
+          alert('✅ Souche externe créée avec succès !');
           document.getElementById('form-new-external').reset();
-          loadStrains();
-          loadSummary();
+          setExternalCreationRoleUi();
+          await loadStrains();
+          await loadSummary();
           document.querySelector('[data-tab="tab-inventory"]').click();
+          activateInventoryType('EXTERNAL');
         } else {
-          const error = await res.json().catch(() => ({}));
-          alert('❌ Erreur : ' + (error.error || 'Erreur inconnue'));
+          alert('❌ Erreur : ' + (result.error || 'Erreur inconnue'));
         }
       } catch (err) {
         console.error('Erreur création souche externe:', err);
@@ -1880,6 +2138,120 @@ Entrez le numéro :`, '1');
     // ============================================
     // FONCTIONS MODALES (à implémenter)
     // ============================================
+
+    async function openEditStrainModal(id) {
+      if (!currentUserIsAdmin()) return alert('Action réservée aux administrateurs.');
+      try {
+        const res = await fetch(`${API_BASE}/api/strains/${encodeURIComponent(id)}`);
+        const strain = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(strain.error || 'Souche introuvable');
+
+        document.getElementById('edit-strain-id').value = strain.id || '';
+        document.getElementById('edit-strain-code').value = strain.code || '';
+        document.getElementById('edit-strain-type').value = strain.strain_type || '';
+        document.getElementById('edit-strain-name').value = strain.name || '';
+        document.getElementById('edit-strain-species').value = strain.species || '';
+        document.getElementById('edit-strain-source-name').value = strain.source_name || '';
+        document.getElementById('edit-strain-source-ref').value = strain.source_ref || '';
+        document.getElementById('edit-strain-quantity').value = strain.quantity ?? '';
+        document.getElementById('edit-strain-unit').value = strain.unit || 'unit';
+        document.getElementById('edit-strain-created-on').value = dateInputValue(strain.created_on);
+        document.getElementById('edit-strain-received-on').value = dateInputValue(strain.received_on);
+        document.getElementById('edit-strain-manufactured-on').value = dateInputValue(strain.manufactured_on);
+        document.getElementById('edit-strain-expiry-on').value = dateInputValue(strain.expiry_on);
+        document.getElementById('edit-strain-storage-temp').value = strain.storage_temp_c ?? '';
+        document.getElementById('edit-strain-storage-location').value = strain.storage_location || '';
+        document.getElementById('edit-strain-notes').value = strain.notes || '';
+
+        const sourceName = document.getElementById('edit-strain-source-name');
+        const sourceRef = document.getElementById('edit-strain-source-ref');
+        const internal = String(strain.strain_type || '').toUpperCase() === 'INTERNAL';
+        sourceName.readOnly = internal;
+        sourceRef.readOnly = internal;
+        sourceName.title = internal ? 'La source P3 d’une souche interne est conservée pour la traçabilité.' : '';
+        sourceRef.title = sourceName.title;
+
+        const modal = document.getElementById('strain-edit-modal');
+        modal.classList.add('open');
+        modal.setAttribute('aria-hidden', 'false');
+      } catch (error) {
+        alert('❌ ' + error.message);
+      }
+    }
+
+    function closeEditStrainModal() {
+      const modal = document.getElementById('strain-edit-modal');
+      if (!modal) return;
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    async function saveStrainEdits() {
+      if (!currentUserIsAdmin()) return alert('Action réservée aux administrateurs.');
+      const id = document.getElementById('edit-strain-id').value;
+      const data = {
+        code: document.getElementById('edit-strain-code').value.trim(),
+        name: document.getElementById('edit-strain-name').value.trim(),
+        species: document.getElementById('edit-strain-species').value.trim(),
+        source_name: document.getElementById('edit-strain-source-name').value.trim() || null,
+        source_ref: document.getElementById('edit-strain-source-ref').value.trim() || null,
+        quantity: document.getElementById('edit-strain-quantity').value ? Number(document.getElementById('edit-strain-quantity').value) : null,
+        unit: document.getElementById('edit-strain-unit').value,
+        created_on: document.getElementById('edit-strain-created-on').value || null,
+        received_on: document.getElementById('edit-strain-received-on').value || null,
+        manufactured_on: document.getElementById('edit-strain-manufactured-on').value || null,
+        expiry_on: document.getElementById('edit-strain-expiry-on').value || null,
+        storage_temp_c: document.getElementById('edit-strain-storage-temp').value ? Number(document.getElementById('edit-strain-storage-temp').value) : null,
+        storage_location: document.getElementById('edit-strain-storage-location').value.trim() || null,
+        notes: document.getElementById('edit-strain-notes').value.trim() || null
+      };
+
+      if (!data.code || !data.name || !data.species) return alert('Code, nom et espèce sont obligatoires.');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/strains/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || 'Modification impossible');
+        closeEditStrainModal();
+        await loadStrains();
+        await loadSummary();
+        alert('✅ Souche modifiée.');
+      } catch (error) {
+        alert('❌ ' + error.message);
+      }
+    }
+
+    async function deleteStrainAdmin(id) {
+      if (!currentUserIsAdmin()) return alert('Action réservée aux administrateurs.');
+      const strain = inventoryStrains.find(x => String(x.id) === String(id));
+      const label = strain ? `${strain.code} — ${strain.name || strain.species || ''}` : id;
+      if (!confirm(`Supprimer définitivement la souche ${label} de la base de données ?\n\nCette action est réservée à l’administrateur. Une souche déjà liée à de l’historique de production ne pourra pas être supprimée.`)) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/strains/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          let message = result.error || 'Suppression impossible';
+          if (Array.isArray(result.dependencies) && result.dependencies.length) {
+            message += '\n\nRéférences : ' + result.dependencies.map(x => `${x.table} (${x.count})`).join(', ');
+          }
+          throw new Error(message);
+        }
+        selectedStrain = null;
+        document.getElementById('selectedStrainLabel').textContent = 'Aucune';
+        document.getElementById('lcInlinePanel').style.display = 'none';
+        await loadStrains();
+        await loadSummary();
+        alert('✅ Souche supprimée définitivement.');
+      } catch (error) {
+        alert('❌ ' + error.message);
+      }
+    }
+
     function openCertifyModal(strainId, code, name) {
       alert(`Fonction de certification à implémenter pour ${code}`);
       // TODO: Ouvrir modal certification
@@ -2070,6 +2442,15 @@ function certifyLC(lcId) {
 }
 
   
+
+// Fermer le formulaire admin de modification avec Echap ou clic hors carte.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeEditStrainModal();
+});
+document.getElementById('strain-edit-modal')?.addEventListener('click', (event) => {
+  if (event.target && event.target.id === 'strain-edit-modal') closeEditStrainModal();
+});
+
 // --- expose submitLcInline for external handlers (fix ReferenceError) ---
 try {
   if (typeof submitLcInline === 'function') window.submitLcInline = submitLcInline;
