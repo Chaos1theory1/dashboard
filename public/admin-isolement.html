@@ -339,16 +339,95 @@
       pointer-events: auto !important;
       z-index: auto !important;
     }
-    /* ✅ Un bouton par ligne dans Actions principales */
-.action-buttons{
-  flex-direction: column;
-  align-items: flex-start; /* garde les boutons alignés à gauche */
-}
+    /* Actions principales : grille compacte, sans espace perdu */
+    .main-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 0;
+    }
+    .main-actions-grid .btn-action {
+      width: 100%;
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      line-height: 1.25;
+    }
 
-.action-buttons .btn-action{
-  width: 100%;            /* optionnel : bouton plein largeur */
-  max-width: 420px;       /* optionnel : limite la largeur si tu veux */
-}
+    /* Onglets P1 / P2 / P3 + pagination */
+    .petri-phase-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px;
+      margin: 0 0 14px;
+      background: #eef3ef;
+      border: 1px solid #d9e3dc;
+      border-radius: 12px;
+      flex-wrap: wrap;
+    }
+    .petri-phase-tab {
+      border: 0;
+      background: transparent;
+      color: #526057;
+      border-radius: 9px;
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+    }
+    .petri-phase-tab:hover { background: #f8fbf9; }
+    .petri-phase-tab.active {
+      background: #fff;
+      color: var(--baslyagro-green-dark);
+      box-shadow: 0 3px 10px rgba(0,0,0,.08);
+    }
+    .petri-phase-count {
+      margin-left: 5px;
+      color: var(--baslyagro-green-dark);
+      font-weight: 900;
+    }
+    .petri-pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .petri-pagination button {
+      border: 0;
+      border-radius: 9px;
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .petri-pagination button:disabled {
+      cursor: not-allowed;
+      opacity: .45;
+    }
+    .petri-page-prev { background: #e5e9e6; color: #33423a; }
+    .petri-page-next { background: var(--baslyagro-green); color: #fff; }
+    .petri-page-status {
+      min-width: 135px;
+      text-align: center;
+      color: var(--baslyagro-green-dark);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    @media (max-width: 991.98px) {
+      .main-actions-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 767.98px) {
+      .main-actions-grid { grid-template-columns: 1fr; }
+      .petri-phase-tabs { display: flex; width: 100%; }
+      .petri-phase-tab { flex: 1 1 0; }
+    }
 
     .btn-label-print {
       background: #0d6efd;
@@ -479,8 +558,10 @@
 
   
     .scan-inline-card {
-      max-width: 980px;
-      margin: 22px auto;
+      width: 100%;
+      max-width: none;
+      box-sizing: border-box;
+      margin: 22px 0;
       background: #ffffff;
       border-radius: 18px;
       padding: 22px;
@@ -696,7 +777,7 @@
 
       <!-- 📌 RÉCAPITULATIF DE L'ISOLATION SÉLECTIONNÉE -->
       <div class="row justify-content-center" id="iso-recap-container" style="display:none;">
-        <div class="col-lg-10">
+        <div class="col-12">
           <div class="admin-card iso-recap-card">
             <div class="iso-recap-head">
               <div>
@@ -723,9 +804,16 @@
 
       <!-- 🟢 LISTE DES BOÎTES DE PÉTRI (P) DE L'ISOLATION -->
       <div class="row justify-content-center" id="petris-list-container" style="display:none;">
-        <div class="col-lg-10">
+        <div class="col-12">
           <div class="admin-card" style="background: #f8f9fa; border-left: 4px solid #6b4b2f;">
-            <h5 style="color: #6b4b2f; margin-bottom: 15px;">🧫 Boîtes de Pétri de cette isolation</h5>
+            <h5 style="color: #6b4b2f; margin-bottom: 12px;">🧫 Boîtes de Pétri de cette isolation</h5>
+
+            <div class="petri-phase-tabs" id="petri-phase-tabs" aria-label="Phases des boîtes de Pétri">
+              <button type="button" class="petri-phase-tab active" data-petri-phase="1" onclick="switchPetriPhase(1)">P1 <span class="petri-phase-count" id="petri-count-p1">[0]</span></button>
+              <button type="button" class="petri-phase-tab" data-petri-phase="2" onclick="switchPetriPhase(2)">P2 <span class="petri-phase-count" id="petri-count-p2">[0]</span></button>
+              <button type="button" class="petri-phase-tab" data-petri-phase="3" onclick="switchPetriPhase(3)">P3 <span class="petri-phase-count" id="petri-count-p3">[0]</span></button>
+            </div>
+
             <div class="table-responsive">
               <table class="table table-sm">
                 <thead style="background: #6b4b2f; color: white;">
@@ -738,31 +826,37 @@
                   </tr>
                 </thead>
                 <tbody id="petris-list-tbody">
-                  <tr><td colspan="6" style="text-align:center;">Aucune boîte de Pétri</td></tr>
+                  <tr><td colspan="5" style="text-align:center;">Aucune boîte de Pétri</td></tr>
                 </tbody>
               </table>
+            </div>
+
+            <div class="petri-pagination" id="petri-pagination">
+              <button type="button" class="petri-page-prev" id="petri-page-prev" onclick="changePetriPhasePage(-1)">← Précédent</button>
+              <span class="petri-page-status" id="petri-page-status">Page 1 sur 1</span>
+              <button type="button" class="petri-page-next" id="petri-page-next" onclick="changePetriPhasePage(1)">Suivant →</button>
             </div>
           </div>
         </div>
       </div>
 
       <div class="row justify-content-center">
-        <div class="col-lg-10">
+        <div class="col-12">
           <div class="admin-card">
             <h4>Actions principales</h4>
-            <div class="action-buttons">
+            <div class="main-actions-grid">
               <button type="button" class="btn-action btn-green" id="btn-new-isolation">
                 ➕ Ajouter une isolation
-              </button><br><br>
+              </button>
               <button type="button" class="btn-action btn-orange" id="btn-add-gelose" disabled>
-                 ➕ 🧪 Ajouter une gélose
-              </button><br><br>
+                ➕ 🧪 Ajouter une gélose
+              </button>
               <button type="button" class="btn-action btn-brown" id="btn-add-petri" disabled>
-                 ➕ 🧫 Ajouter une boîte de Pétri
-              </button><br><br>
+                ➕ 🧫 Ajouter une boîte de Pétri
+              </button>
               <button type="button" class="btn-action btn-grey" id="btn-add-solution" disabled>
                 ➕ 💧 Ajouter une recette de solution nutritive (sans mycélium)
-              </button><br><br>
+              </button>
               <button type="button" class="btn-action btn-purple" id="btn-protocole" disabled style="background: #6f42c1; color: white;">
                 📊 Protocole de comparaison
               </button>
@@ -1095,6 +1189,12 @@
       let selectedIsoId = null;
       let selectedIso = null;
       let currentPetris = [];
+      let currentActivePetris = [];
+      let currentPetriGelosesMap = {};
+      let petriPhaseActive = 1;
+      let petriPaginationIsoId = null;
+      const PETRI_PAGE_SIZE = 10;
+      const petriPhasePages = { 1: 1, 2: 1, 3: 1 };
 
       const CYCLES_BIO = {
         PLEUROTUS: {
@@ -2333,28 +2433,40 @@ ${labels}
       };
       window.closeStockSummaryModal = function() { document.getElementById("stock-summary-modal").style.display = "none"; };
 
-      async function loadPetrisList(isoId) {
-        const petrisListContainer = document.getElementById("petris-list-container");
-        const petrisListTbody = document.getElementById("petris-list-tbody");
-        try {
-          const petris = await apiGet("/api/isolements/" + isoId + "/petris");
-          currentPetris = Array.isArray(petris) ? petris : [];
-          const geloses = await apiGet("/api/isolements/" + isoId + "/geloses");
-          const gelosesMap = {};
-          geloses.forEach(g => { gelosesMap[g.id] = g.nom; });
-          renderStockExpiryPanel(currentPetris);
-          renderStockGroup(currentPetris, gelosesMap);
+      function renderPetriPhasePage() {
+        const tbody = document.getElementById("petris-list-tbody");
+        const pageStatus = document.getElementById("petri-page-status");
+        const prevBtn = document.getElementById("petri-page-prev");
+        const nextBtn = document.getElementById("petri-page-next");
+        if (!tbody) return;
 
-          const activePetris = currentPetris.filter(function(p) { return !isPetriInFrigoStock(p); });
+        [1, 2, 3].forEach(function(phase) {
+          const count = currentActivePetris.filter(function(p) { return Number(p.phase) === phase; }).length;
+          const countEl = document.getElementById("petri-count-p" + phase);
+          if (countEl) countEl.textContent = "[" + count + "]";
+        });
 
-          if (!activePetris.length) {
-            petrisListTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Aucune boîte hors stock frigorifique</td></tr>';
-            petrisListContainer.style.display = "none";
-            return;
-          }
+        document.querySelectorAll(".petri-phase-tab").forEach(function(btn) {
+          btn.classList.toggle("active", Number(btn.getAttribute("data-petri-phase")) === Number(petriPhaseActive));
+        });
 
-          petrisListTbody.innerHTML = activePetris.map(p => {
-            const geloseName = gelosesMap[p.gelose_id] || "Gélose " + p.gelose_id;
+        const phasePetris = currentActivePetris.filter(function(p) {
+          return Number(p.phase) === Number(petriPhaseActive);
+        });
+
+        const totalPages = Math.max(1, Math.ceil(phasePetris.length / PETRI_PAGE_SIZE));
+        let page = Number(petriPhasePages[petriPhaseActive] || 1);
+        page = Math.min(Math.max(page, 1), totalPages);
+        petriPhasePages[petriPhaseActive] = page;
+
+        const startIndex = (page - 1) * PETRI_PAGE_SIZE;
+        const rows = phasePetris.slice(startIndex, startIndex + PETRI_PAGE_SIZE);
+
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777;">Aucune boîte P' + petriPhaseActive + ' hors stock frigorifique</td></tr>';
+        } else {
+          tbody.innerHTML = rows.map(function(p) {
+            const geloseName = currentPetriGelosesMap[p.gelose_id] || "Gélose " + p.gelose_id;
             const j0 = formatJ0TableEtEtiquette(p.j0);
             const statut = p.status || "En cours";
             return '<tr>' +
@@ -2363,7 +2475,7 @@ ${labels}
               '<td>' + htmlEscape(j0) + '</td>' +
               '<td>' + htmlEscape(statut) + renderStockExpiryBadge(p) + renderTreatmentBadge(p) + '</td>' +
               '<td>' +
-                '<a class="btn btn-sm btn-primary" href="admin-isolement-journal.html?iso=' + isoId + '&petri=' + p.id + '" style="padding:4px 8px; font-size:11px; background:#2fa35a; color:white; border:none; border-radius:4px; cursor:pointer;text-decoration:none;">📅 Voir journal</a> ' +
+                '<a class="btn btn-sm btn-primary" href="admin-isolement-journal.html?iso=' + selectedIsoId + '&petri=' + p.id + '" style="padding:4px 8px; font-size:11px; background:#2fa35a; color:white; border:none; border-radius:4px; cursor:pointer;text-decoration:none;">📅 Voir journal</a> ' +
                 '<button type="button" class="btn-label-print" onclick="printPetriLabelById(' + p.id + ')">🖨️ Étiquette</button> ' +
                 '<button type="button" class="btn-stock-frigo" onclick="stockerPetriFrigoById(' + p.id + ')">📦 Stockage</button> ' +
                 '<button type="button" class="btn btn-sm" onclick="openStockSummary(' + p.id + ')" style="padding:4px 8px; font-size:11px; background:#17a2b8; color:white; border:none; border-radius:4px; cursor:pointer; margin-left:6px;">Résumé</button> ' +
@@ -2371,11 +2483,74 @@ ${labels}
               '</td>' +
             '</tr>';
           }).join("");
+        }
 
+        if (pageStatus) pageStatus.textContent = "Page " + page + " sur " + totalPages;
+        if (prevBtn) prevBtn.disabled = page <= 1;
+        if (nextBtn) nextBtn.disabled = page >= totalPages;
+      }
+
+      function switchPetriPhase(phase) {
+        const nextPhase = Number(phase);
+        if (![1, 2, 3].includes(nextPhase)) return;
+        petriPhaseActive = nextPhase;
+        renderPetriPhasePage();
+      }
+      window.switchPetriPhase = switchPetriPhase;
+
+      function changePetriPhasePage(direction) {
+        const phasePetris = currentActivePetris.filter(function(p) {
+          return Number(p.phase) === Number(petriPhaseActive);
+        });
+        const totalPages = Math.max(1, Math.ceil(phasePetris.length / PETRI_PAGE_SIZE));
+        const currentPage = Number(petriPhasePages[petriPhaseActive] || 1);
+        const nextPage = currentPage + Number(direction || 0);
+        if (nextPage < 1 || nextPage > totalPages) return;
+        petriPhasePages[petriPhaseActive] = nextPage;
+        renderPetriPhasePage();
+      }
+      window.changePetriPhasePage = changePetriPhasePage;
+
+      async function loadPetrisList(isoId) {
+        const petrisListContainer = document.getElementById("petris-list-container");
+        const petrisListTbody = document.getElementById("petris-list-tbody");
+        try {
+          const petris = await apiGet("/api/isolements/" + isoId + "/petris");
+          currentPetris = Array.isArray(petris) ? petris : [];
+          const geloses = await apiGet("/api/isolements/" + isoId + "/geloses");
+          currentPetriGelosesMap = {};
+          geloses.forEach(function(g) { currentPetriGelosesMap[g.id] = g.nom; });
+          renderStockExpiryPanel(currentPetris);
+          renderStockGroup(currentPetris, currentPetriGelosesMap);
+
+          currentActivePetris = currentPetris.filter(function(p) { return !isPetriInFrigoStock(p); });
+
+          if (Number(petriPaginationIsoId) !== Number(isoId)) {
+            petriPaginationIsoId = Number(isoId);
+            petriPhasePages[1] = 1;
+            petriPhasePages[2] = 1;
+            petriPhasePages[3] = 1;
+            petriPhaseActive = [1, 2, 3].find(function(phase) {
+              return currentActivePetris.some(function(p) { return Number(p.phase) === phase; });
+            }) || 1;
+          }
+
+          if (!currentActivePetris.length) {
+            [1, 2, 3].forEach(function(phase) {
+              const countEl = document.getElementById("petri-count-p" + phase);
+              if (countEl) countEl.textContent = "[0]";
+            });
+            petrisListTbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Aucune boîte hors stock frigorifique</td></tr>';
+            petrisListContainer.style.display = "block";
+            renderPetriPhasePage();
+            return;
+          }
+
+          renderPetriPhasePage();
           petrisListContainer.style.display = "block";
         } catch (e) {
           console.error(e);
-          petrisListTbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erreur chargement</td></tr>';
+          petrisListTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red;">Erreur chargement</td></tr>';
         }
       }
 
