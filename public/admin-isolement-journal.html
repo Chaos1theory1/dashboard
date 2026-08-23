@@ -471,6 +471,63 @@
     }
 
     /* ✅ iPhone/mobile : les jours passent à la ligne au lieu de déborder */
+    /* === PETRI JOURNAL: SUIVI SIMPLIFIE CLIQUABLE === */
+    .timeline-container {
+      overflow: visible;
+    }
+    .timeline-days {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      gap: 12px 10px;
+      margin: 16px 0 4px;
+    }
+    .timeline-line { display: none; }
+    .timeline-day {
+      flex: 0 0 auto;
+      min-width: 50px;
+      cursor: pointer;
+    }
+    .day-marker {
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+    .day-marker:hover { transform: translateY(-1px); }
+    .day-marker.treated {
+      background: var(--baslyagro-green);
+      border-color: var(--baslyagro-green);
+      color: #fff;
+    }
+    .day-marker.untreated {
+      background: #f59e0b;
+      border-color: #f59e0b;
+      color: #fff;
+    }
+    .day-marker.current {
+      background: var(--baslyagro-blue);
+      border-color: var(--baslyagro-blue);
+      color: #fff;
+    }
+    .day-marker.future {
+      background: #fff;
+      border-color: #d8dedb;
+      color: #667085;
+    }
+    .day-marker.selected {
+      outline: 4px solid rgba(47,163,90,.22);
+      outline-offset: 2px;
+    }
+    .day-status.status-treated { background:#dff5e8; color:#116b35; }
+    .day-status.status-untreated { background:#fff0cf; color:#a15c00; }
+    .day-status.status-current { background:#e8f4ff; color:#21618c; }
+    .day-status.status-future { background:#f1f2f6; color:#667085; }
+    .petri-selected-day-label {
+      margin: 0 0 12px;
+      color: #1f7a41;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
     @media (max-width: 767.98px) {
       .timeline-container {
         overflow: visible;
@@ -665,7 +722,7 @@
 
           <div class="timeline-container">
             <h5>⏱️ Suivi simplifié</h5>
-            <p style="margin:0 0 12px;color:#666;font-size:13px;">Affichage limité au jour courant et aux jours déjà traités.</p>
+            <p style="margin:0 0 12px;color:#666;font-size:13px;">Cliquez sur un jour pour afficher uniquement son suivi. Vert = traité, orange = non traité, bleu = jour courant.</p>
             <div class="timeline-days" id="timeline">
               <div class="timeline-line"></div>
             </div>
@@ -714,7 +771,7 @@
     let alertes = [];
     let currentIsoId = null;
     let currentPetriId = null;
-    let editingTreatedDay = null;
+    let selectedJournalDay = null;
 
     const QUESTIONS = [
       { id: 'q1', field: 'q1_croissance_visible', text: 'Croissance mycélienne visible', note: 4 },
@@ -782,6 +839,13 @@
           optimalEnd: currentBox.fenetre_optimale_fin
         };
 
+        // Le journal s'ouvre sur le jour courant. Après une sauvegarde/recharge,
+        // on conserve le jour sélectionné tant qu'il reste dans le cycle.
+        const maxSelectableDay = Math.max(0, Number(currentCycle.cycleDuration || currentBox.jour_actuel || 0));
+        if (selectedJournalDay === null || !Number.isFinite(Number(selectedJournalDay)) || Number(selectedJournalDay) < 0 || Number(selectedJournalDay) > maxSelectableDay) {
+          selectedJournalDay = Number(currentBox.jour_actuel || 0);
+        }
+
         // Afficher l'interface
         document.getElementById('loading').style.display = 'none';
         document.getElementById('content').style.display = 'block';
@@ -847,6 +911,7 @@
     // AFFICHER LES ALERTES
     // ==================================================
     function showAlertes() {
+      document.getElementById('alertUntreated').classList.remove('show');
       if (alertes && alertes.length > 0) {
         const list = document.getElementById('untreatedDaysList');
         list.innerHTML = '';
@@ -860,92 +925,97 @@
     }
 
     // ==================================================
-    // CRÉER LA TIMELINE
+    // CRÉER LA TIMELINE CLIQUABLE : TOUS LES JOURS DU CYCLE
     // ==================================================
     function createTimeline() {
       const timeline = document.getElementById('timeline');
       timeline.innerHTML = '';
 
-      const currentDay = Number(currentBox.jour_actuel || 0);
-      const daysToShow = [];
+      const currentDay = Math.max(0, Number(currentBox.jour_actuel || 0));
+      const cycleDuration = Math.max(currentDay, Number(currentCycle.cycleDuration || currentDay));
+      const selectedDay = Number.isFinite(Number(selectedJournalDay)) ? Number(selectedJournalDay) : currentDay;
 
-      observations
-        .filter(o => o && o.traite)
-        .map(o => Number(o.jour_cycle))
-        .filter(day => Number.isFinite(day) && day !== currentDay)
-        .sort((a, b) => a - b)
-        .forEach(day => daysToShow.push(day));
-
-      daysToShow.push(currentDay);
-
-      if (!daysToShow.length) {
-        timeline.innerHTML = '<p style="margin:0;color:#666;">Aucun jour traité pour le moment.</p>';
-        return;
-      }
-
-      daysToShow.forEach(day => {
-        const obs = observations.find(o => Number(o.jour_cycle) === Number(day));
+      for (let day = 0; day <= cycleDuration; day++) {
+        const obs = observations.find(o => Number(o.jour_cycle) === day);
         const isCurrent = day === currentDay;
-        const isTreated = obs && obs.traite;
-        const isOptimal = day >= currentCycle.optimalStart && day <= currentCycle.optimalEnd;
+        const isTreated = !!(obs && obs.traite);
+        const isPastUntreated = day < currentDay && !isTreated;
+        const isFuture = day > currentDay;
+        const isOptimal = day >= Number(currentCycle.optimalStart) && day <= Number(currentCycle.optimalEnd);
 
         const dayContainer = document.createElement('div');
         dayContainer.className = 'timeline-day';
+        dayContainer.setAttribute('role', 'button');
+        dayContainer.setAttribute('tabindex', '0');
+        dayContainer.setAttribute('aria-label', `Afficher le suivi J${day}`);
+        dayContainer.onclick = () => selectJournalDay(day);
+        dayContainer.onkeydown = event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectJournalDay(day);
+          }
+        };
 
         const marker = document.createElement('div');
         marker.className = 'day-marker';
         marker.textContent = `J${day}`;
 
-        if (isTreated) marker.classList.add('past');
+        // Le jour courant reste toujours bleu, même s'il a déjà été traité.
         if (isCurrent) marker.classList.add('current');
-        if (isOptimal) marker.classList.add('optimal');
+        else if (isTreated) marker.classList.add('treated');
+        else if (isPastUntreated) marker.classList.add('untreated');
+        else if (isFuture) marker.classList.add('future');
 
+        if (day === selectedDay) marker.classList.add('selected');
+        if (isOptimal) marker.classList.add('optimal');
         dayContainer.appendChild(marker);
 
         const status = document.createElement('div');
-        status.className = isOptimal ? 'day-status optimal' : 'day-status';
-        status.textContent = isCurrent ? 'Jour courant' : 'Traité';
+        status.className = 'day-status';
+        if (isCurrent) {
+          status.classList.add('status-current');
+          status.textContent = 'Jour courant';
+        } else if (isTreated) {
+          status.classList.add('status-treated');
+          status.textContent = 'Traité';
+        } else if (isPastUntreated) {
+          status.classList.add('status-untreated');
+          status.textContent = 'Non traité';
+        } else {
+          status.classList.add('status-future');
+          status.textContent = 'À venir';
+        }
         dayContainer.appendChild(status);
-
         timeline.appendChild(dayContainer);
-      });
+      }
     }
 
     // ==================================================
-    // CRÉER LES ENTRÉES DU JOURNAL
+    // AFFICHER UN SEUL JOUR + GARDER L'HISTORIQUE TRAITÉ
     // ==================================================
     function createJournalEntries() {
       const container = document.getElementById('journalEntries');
       container.innerHTML = '';
 
-      const currentDay = Number(currentBox.jour_actuel || 0);
-      const currentObs = observations.find(o => Number(o.jour_cycle) === currentDay);
+      const currentDay = Math.max(0, Number(currentBox.jour_actuel || 0));
+      const cycleDuration = Math.max(currentDay, Number(currentCycle.cycleDuration || currentDay));
+      let day = Number.isFinite(Number(selectedJournalDay)) ? Number(selectedJournalDay) : currentDay;
+      day = Math.min(cycleDuration, Math.max(0, day));
+      selectedJournalDay = day;
 
-      // 1) Le jour courant reste en premier pour enregistrer sans descendre.
-      container.appendChild(createDayEntry(currentDay, currentObs));
+      const selectedObs = observations.find(o => Number(o.jour_cycle) === day) || null;
+      const label = document.createElement('div');
+      label.className = 'petri-selected-day-label';
+      label.textContent = `Suivi sélectionné : J${day}`;
+      container.appendChild(label);
 
-      // 2) Les anciens jours NON traités restent visibles pour pouvoir les compléter.
-      const untreatedPastDays = [];
-      for (let d = 0; d < currentDay; d++) {
-        const obs = observations.find(o => Number(o.jour_cycle) === d);
-        if (!obs || !obs.traite) untreatedPastDays.push({ day: d, obs: obs || null });
-      }
+      // Comme dans le journal grain : un seul formulaire/jour visible à la fois.
+      // Les jours déjà traités restent éditables lorsqu'ils sont sélectionnés.
+      container.appendChild(createDayEntry(day, selectedObs, { forceEditable: day <= currentDay }));
 
-      if (untreatedPastDays.length) {
-        const title = document.createElement('h5');
-        title.style.margin = '25px 0 12px';
-        title.style.color = '#856404';
-        title.textContent = '⚠️ Jours non traités à compléter';
-        container.appendChild(title);
-
-        untreatedPastDays.forEach(item => {
-          container.appendChild(createDayEntry(item.day, item.obs));
-        });
-      }
-
-      // 3) Les jours déjà traités sont gardés en historique résumé.
+      // Historique existant conservé sous le jour sélectionné.
       const treatedDays = observations
-        .filter(o => o && o.traite && Number(o.jour_cycle) !== currentDay)
+        .filter(o => o && o.traite && Number(o.jour_cycle) !== currentDay && Number(o.jour_cycle) !== day)
         .sort((a, b) => Number(a.jour_cycle) - Number(b.jour_cycle));
 
       if (treatedDays.length) {
@@ -956,18 +1026,25 @@
         container.appendChild(title);
 
         treatedDays.forEach(obs => {
-          const day = Number(obs.jour_cycle);
-          container.appendChild(createDayEntry(day, obs));
+          const treatedDay = Number(obs.jour_cycle);
+          container.appendChild(createDayEntry(treatedDay, obs));
         });
       }
     }
 
+    // ==================================================
+    // SÉLECTIONNER / MODIFIER UN JOUR
+    // ==================================================
+    function selectJournalDay(day) {
+      selectedJournalDay = Number(day);
+      createTimeline();
+      createJournalEntries();
+    }
+    window.selectJournalDay = selectJournalDay;
 
-    // ==================================================
-    // MODIFIER UN JOUR DÉJÀ TRAITÉ
-    // ==================================================
     function modifierJour(day) {
-      editingTreatedDay = Number(day);
+      selectedJournalDay = Number(day);
+      createTimeline();
       createJournalEntries();
       setTimeout(function() {
         const entry = document.getElementById('entry-' + day);
@@ -976,14 +1053,14 @@
     }
     window.modifierJour = modifierJour;
 
-    function createDayEntry(day, obs) {
+    function createDayEntry(day, obs, options = {}) {
       const entry = document.createElement('div');
       entry.className = 'journal-entry';
       entry.id = `entry-${day}`;
 
-      const isCurrent = day === currentBox.jour_actuel;
-      const isPast = day < currentBox.jour_actuel;
-      const isFuture = day > currentBox.jour_actuel;
+      const isCurrent = Number(day) === Number(currentBox.jour_actuel);
+      const isPast = Number(day) < Number(currentBox.jour_actuel);
+      const isFuture = Number(day) > Number(currentBox.jour_actuel);
       const isTreated = obs && obs.traite;
 
       if (isCurrent) entry.classList.add('active');
@@ -997,7 +1074,8 @@
 
       const dateStr = new Date(new Date(currentBox.date_debut).getTime() + day*86400000).toLocaleDateString('fr-FR');
 
-      if (isTreated && editingTreatedDay === Number(day)) {
+      const forceEditable = !!options.forceEditable;
+      if (forceEditable && !isFuture) {
         entry.innerHTML = createActiveEntry(day, dateStr, badge, obs);
       } else if (isCurrent || (isPast && !isTreated)) {
         entry.innerHTML = createActiveEntry(day, dateStr, badge, obs);
@@ -1086,7 +1164,7 @@
 
       return `
         <div class="entry-header">
-          <span>📄 ${Number(day) === Number(currentBox.jour_actuel || 0) ? 'Jour courant' : 'Jour non traité'} J${day} - ${dateStr}</span>
+          <span>📄 ${Number(day) === Number(currentBox.jour_actuel || 0) ? 'Jour courant' : (obs && obs.traite ? 'Jour traité' : 'Jour non traité')} J${day} - ${dateStr}</span>
           ${badge}
         </div>
 
