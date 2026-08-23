@@ -318,6 +318,7 @@ async function ensureUserManagementSchema() {
       email TEXT UNIQUE NOT NULL,
       username TEXT UNIQUE NOT NULL,
       display_name TEXT,
+      phone_number TEXT,
       role_id BIGINT NOT NULL REFERENCES app_roles(id),
       active BOOLEAN NOT NULL DEFAULT TRUE,
       must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
@@ -370,6 +371,7 @@ async function ensureUserManagementSchema() {
     END $$;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email TEXT;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS display_name TEXT;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone_number TEXT;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
@@ -417,7 +419,7 @@ async function ensureUserManagementSchema() {
 
 async function loadApplicationUser(userId) {
   const result = await realPool.query(`
-    SELECT u.auth_user_id AS "userId", u.email, u.username, u.display_name, u.active,
+    SELECT u.auth_user_id AS "userId", u.email, u.username, u.display_name, u.phone_number, u.active,
            u.must_change_password, u.last_seen_at, r.code AS role,
            COALESCE(array_agg(p.code) FILTER (WHERE p.code IS NOT NULL), ARRAY[]::text[]) AS permissions
     FROM app_users u JOIN app_roles r ON r.id=u.role_id
@@ -743,7 +745,7 @@ app.get('/api/admin/users', requirePermission('users.manage'), async (_req, res)
   try {
     await ensureUserManagementSchema();
     const result = await realPool.query(`
-      SELECT u.auth_user_id AS id,u.email,u.username,u.display_name,u.active,u.must_change_password,
+      SELECT u.auth_user_id AS id,u.email,u.username,u.display_name,u.phone_number,u.active,u.must_change_password,
              u.last_seen_at,u.created_at,r.code AS role,r.name AS role_name,
              (u.active AND u.last_seen_at >= now()-interval '75 minutes') AS online
       FROM app_users u JOIN app_roles r ON r.id=u.role_id
@@ -1211,15 +1213,22 @@ app.post('/api/admin/users', requirePermission('users.manage'), async (req, res)
     const email = String(req.body?.email || '').trim().toLowerCase();
     const username = String(req.body?.username || '').trim();
     const displayName = String(req.body?.display_name || username).trim();
+    const phoneNumber = String(req.body?.phone_number || '').trim();
     const password = String(req.body?.password || '');
     const role = String(req.body?.role || 'operator').trim();
-    if (!email || !username || password.length < 10) return res.status(400).json({ error: 'Email, nom utilisateur et mot de passe (10 caractères minimum) requis.' });
+    if (!email || !username || !phoneNumber || password.length < 10) return res.status(400).json({ error: 'Nom utilisateur, email, téléphone et mot de passe (10 caractères minimum) requis.' });
+    if (phoneNumber.length > 50) return res.status(400).json({ error: 'Le numéro de téléphone est trop long.' });
     const roleResult = await realPool.query(`SELECT id FROM app_roles WHERE code=$1`, [role]);
     if (!roleResult.rows.length) return res.status(400).json({ error: 'Rôle invalide.' });
-    const { data, error } = await getSupabaseAdmin().auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { username, display_name: displayName } });
+    const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { username, display_name: displayName, phone_number: phoneNumber }
+    });
     if (error || !data?.user) throw error || new Error('Création Supabase impossible');
     try {
-      await realPool.query(`INSERT INTO app_users(auth_user_id,email,username,display_name,role_id,active,must_change_password) VALUES($1,$2,$3,$4,$5,TRUE,TRUE) ON CONFLICT(auth_user_id) DO UPDATE SET email=EXCLUDED.email,username=EXCLUDED.username,display_name=EXCLUDED.display_name,role_id=EXCLUDED.role_id,active=TRUE,must_change_password=TRUE,updated_at=now()`, [data.user.id,email,username,displayName,roleResult.rows[0].id]);
+      await realPool.query(`INSERT INTO app_users(auth_user_id,email,username,display_name,phone_number,role_id,active,must_change_password) VALUES($1,$2,$3,$4,$5,$6,TRUE,TRUE) ON CONFLICT(auth_user_id) DO UPDATE SET email=EXCLUDED.email,username=EXCLUDED.username,display_name=EXCLUDED.display_name,phone_number=EXCLUDED.phone_number,role_id=EXCLUDED.role_id,active=TRUE,must_change_password=TRUE,updated_at=now()`, [data.user.id,email,username,displayName,phoneNumber,roleResult.rows[0].id]);
     } catch (dbError) {
       await getSupabaseAdmin().auth.admin.deleteUser(data.user.id).catch(() => {});
       throw dbError;
@@ -1237,16 +1246,37 @@ app.put('/api/admin/users/:id', requirePermission('users.manage'), async (req, r
     const email = String(req.body?.email || current.email).trim().toLowerCase();
     const username = String(req.body?.username || current.username).trim();
     const displayName = String(req.body?.display_name ?? current.display_name ?? username).trim();
+    const phoneNumber = String(req.body?.phone_number ?? current.phone_number ?? '').trim();
+    const password = String(req.body?.password || '');
     const role = String(req.body?.role || current.role).trim();
+    if (!email || !username || !phoneNumber) return res.status(400).json({ error: 'Nom utilisateur, email et téléphone requis.' });
+    if (phoneNumber.length > 50) return res.status(400).json({ error: 'Le numéro de téléphone est trop long.' });
+    if (password && password.length < 10) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 10 caractères.' });
     if (userId === req.adminSession?.userId && role !== 'admin') return res.status(400).json({ error: 'Vous ne pouvez pas retirer votre propre rôle administrateur.' });
     const rr = await realPool.query(`SELECT id FROM app_roles WHERE code=$1`, [role]);
     if (!rr.rows.length) return res.status(400).json({ error: 'Rôle invalide.' });
+
+    const adminAuth = getSupabaseAdmin().auth.admin;
+    const { data: authData, error: authReadError } = await adminAuth.getUserById(userId);
+    if (authReadError) throw authReadError;
+    const authPatch = {
+      user_metadata: {
+        ...(authData?.user?.user_metadata || {}),
+        username,
+        display_name: displayName,
+        phone_number: phoneNumber
+      }
+    };
     if (email !== current.email) {
-      const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, { email, email_confirm: true });
-      if (error) throw error;
+      authPatch.email = email;
+      authPatch.email_confirm = true;
     }
-    await realPool.query(`UPDATE app_users SET email=$2,username=$3,display_name=$4,role_id=$5,updated_at=now() WHERE auth_user_id=$1`, [userId,email,username,displayName,rr.rows[0].id]);
-    res.json({ success: true });
+    if (password) authPatch.password = password;
+    const { error: authUpdateError } = await adminAuth.updateUserById(userId, authPatch);
+    if (authUpdateError) throw authUpdateError;
+
+    await realPool.query(`UPDATE app_users SET email=$2,username=$3,display_name=$4,phone_number=$5,role_id=$6,must_change_password=CASE WHEN $7::boolean THEN TRUE ELSE must_change_password END,updated_at=now() WHERE auth_user_id=$1`, [userId,email,username,displayName,phoneNumber,rr.rows[0].id,Boolean(password)]);
+    res.json({ success: true, password_changed: Boolean(password) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
