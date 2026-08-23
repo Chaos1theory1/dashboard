@@ -41,10 +41,16 @@
     .refresh-btn:hover{background:var(--green-soft)}
     .refresh-btn:disabled{opacity:.55;cursor:wait}
     .task-stats{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:12px;margin-bottom:20px}
-    .stat{background:#f8faf9;border:1px solid #e5ebe7;border-radius:11px;padding:13px 14px}
+    .stat{background:#f8faf9;border:1px solid #e5ebe7;border-radius:11px;padding:13px 14px;text-align:left;width:100%;font:inherit;cursor:pointer;transition:.15s ease;position:relative}
+    .stat:hover{transform:translateY(-1px);border-color:#b9d4c2;box-shadow:0 6px 16px rgba(0,0,0,.06)}
+    .stat:focus-visible{outline:3px solid rgba(47,163,90,.24);outline-offset:2px}
+    .stat.active{background:var(--green-soft);border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
+    .stat.active::after{content:'✓';position:absolute;top:9px;right:11px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--green);color:#fff;font-size:11px;font-weight:900}
     .stat-label{text-transform:uppercase;letter-spacing:.07em;color:#768078;font-size:10px;font-weight:700;margin-bottom:5px}
     .stat-value{font-size:24px;line-height:1;font-weight:900;color:#26352b}
     .stat.urgent{background:var(--red-soft);border-color:#f0cbc5}.stat.urgent .stat-value{color:var(--red)}
+    .stat.urgent.active{background:var(--red-soft);border-color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}
+    .stat.urgent.active::after{background:var(--red)}
     .task-list{display:flex;flex-direction:column;gap:11px}
     .task-item{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:15px 16px;border:1px solid #e3e9e5;border-left:5px solid var(--green);border-radius:11px;background:#fff;transition:.15s ease}
     .task-item:hover{transform:translateY(-1px);box-shadow:0 7px 18px rgba(0,0,0,.07)}
@@ -100,13 +106,13 @@
           <button type="button" id="refresh-btn" class="refresh-btn">↻ Actualiser les tâches</button>
         </div>
 
-        <div class="task-stats">
-          <div class="stat"><div class="stat-label">Total à traiter</div><div class="stat-value" id="stat-total">—</div></div>
-          <div class="stat urgent"><div class="stat-label">Urgentes / retard</div><div class="stat-value" id="stat-urgent">—</div></div>
-          <div class="stat"><div class="stat-label">Souches</div><div class="stat-value" id="stat-souches">—</div></div>
-          <div class="stat"><div class="stat-label">Isolation</div><div class="stat-value" id="stat-isolation">—</div></div>
-          <div class="stat"><div class="stat-label">Mycélium liquide</div><div class="stat-value" id="stat-lc">—</div></div>
-          <div class="stat"><div class="stat-label">Mycélium sur grain</div><div class="stat-value" id="stat-grain">—</div></div>
+        <div class="task-stats" aria-label="Filtres des tâches">
+          <button type="button" class="stat active" data-task-filter="all" aria-pressed="true"><div class="stat-label">Total à traiter</div><div class="stat-value" id="stat-total">—</div></button>
+          <button type="button" class="stat urgent" data-task-filter="urgent" aria-pressed="false"><div class="stat-label">Urgentes / retard</div><div class="stat-value" id="stat-urgent">—</div></button>
+          <button type="button" class="stat" data-task-filter="Souches" aria-pressed="false"><div class="stat-label">Souches</div><div class="stat-value" id="stat-souches">—</div></button>
+          <button type="button" class="stat" data-task-filter="Isolation tissulaire" aria-pressed="false"><div class="stat-label">Isolation</div><div class="stat-value" id="stat-isolation">—</div></button>
+          <button type="button" class="stat" data-task-filter="Mycélium liquide" aria-pressed="false"><div class="stat-label">Mycélium liquide</div><div class="stat-value" id="stat-lc">—</div></button>
+          <button type="button" class="stat" data-task-filter="Mycélium sur grain" aria-pressed="false"><div class="stat-label">Mycélium sur grain</div><div class="stat-value" id="stat-grain">—</div></button>
         </div>
 
         <div id="tasks-container" class="task-list"><div class="loading">Chargement des tâches obligatoires…</div></div>
@@ -128,6 +134,29 @@
       'Mycélium sur grain': '🌾'
     };
 
+    let allTasks = [];
+    let activeTaskFilter = 'all';
+
+    function taskMatchesFilter(task, filter){
+      if(filter === 'all') return true;
+      if(filter === 'urgent'){
+        const severity = String(task && task.severity || '').toLowerCase();
+        const dueLabel = String(task && task.due_label || '').toLowerCase();
+        return severity === 'urgent' || severity === 'overdue' || dueLabel.includes('retard');
+      }
+      return String(task && task.category || '') === filter;
+    }
+
+    function setTaskFilter(filter){
+      activeTaskFilter = filter || 'all';
+      document.querySelectorAll('[data-task-filter]').forEach(btn => {
+        const active = btn.dataset.taskFilter === activeTaskFilter;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      renderTasks(allTasks.filter(task => taskMatchesFilter(task, activeTaskFilter)));
+    }
+
     function esc(value){
       return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
@@ -147,7 +176,10 @@
     function renderTasks(tasks){
       const box = document.getElementById('tasks-container');
       if(!Array.isArray(tasks) || !tasks.length){
-        box.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><strong>Aucune tâche obligatoire en attente</strong>Les journaux et contrôles connus sont à jour pour aujourd'hui.</div>`;
+        const filtered = activeTaskFilter !== 'all';
+        box.innerHTML = filtered
+          ? `<div class="empty-state"><div class="empty-icon">🔎</div><strong>Aucune tâche pour ce filtre</strong>Aucune tâche en attente ne correspond actuellement au filtre sélectionné.</div>`
+          : `<div class="empty-state"><div class="empty-icon">✅</div><strong>Aucune tâche obligatoire en attente</strong>Les journaux et contrôles connus sont à jour pour aujourd'hui.</div>`;
         return;
       }
       box.innerHTML = tasks.map(t => `
@@ -178,7 +210,8 @@
         const data = await r.json().catch(() => ({}));
         if(!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
         updateStats(data);
-        renderTasks(data.tasks || []);
+        allTasks = Array.isArray(data.tasks) ? data.tasks : [];
+        setTaskFilter(activeTaskFilter);
         if(Array.isArray(data.warnings) && data.warnings.length){
           warn.textContent = 'Certaines sources n’ont pas pu être analysées : ' + data.warnings.join(' · ');
           warn.style.display = 'block';
@@ -194,6 +227,9 @@
       }
     }
 
+    document.querySelectorAll('[data-task-filter]').forEach(btn => {
+      btn.addEventListener('click', () => setTaskFilter(btn.dataset.taskFilter));
+    });
     document.getElementById('refresh-btn').addEventListener('click', loadTasks);
     document.addEventListener('DOMContentLoaded', loadTasks);
   </script>
