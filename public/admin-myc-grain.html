@@ -61,6 +61,21 @@
     .grain-history-table .grain-unit-indent{padding-left:10px!important;border-left:4px solid var(--green)!important}
     .grain-history-table .grain-small{font-size:10px!important;line-height:1.3!important}
     .grain-history-table .grain-unit-code{font-size:11px!important}
+
+    /* === GRAIN UI: sections pleine largeur + pagination + filtre statut === */
+    .grain-wide-section{margin-left:0!important;margin-right:0!important}
+    .grain-wide-section>[class*="col-"]{flex:0 0 100%!important;max-width:100%!important;padding-left:0!important;padding-right:0!important}
+    .grain-pagination{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:16px}
+    .grain-pagination .btn-main{min-width:118px}
+    .grain-pagination-status{min-width:145px;text-align:center;font-weight:900;color:var(--green-dark)}
+    .grain-pagination-note{font-size:11px;color:#667085;width:100%;text-align:center;margin-top:-4px}
+    .grain-status-head{position:relative;overflow:visible!important}
+    .grain-status-filter-wrap{position:relative;display:inline-block}
+    .grain-status-filter-toggle{border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:900;text-transform:uppercase;letter-spacing:.06em;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+    .grain-status-filter-toggle:hover{color:var(--green-dark)}
+    .grain-status-filter{display:none;position:absolute;z-index:80;top:calc(100% + 8px);right:0;min-width:205px;width:auto!important;margin:0!important;padding:8px 10px!important;border:1px solid #cfd8d2!important;border-radius:9px!important;background:#fff!important;box-shadow:0 10px 28px rgba(0,0,0,.16)!important;font-size:12px!important;text-transform:none!important;letter-spacing:0!important}
+    .grain-status-filter-wrap.open .grain-status-filter{display:block}
+    @media(max-width:767.98px){.grain-status-filter{right:auto;left:0;min-width:180px}.grain-pagination .btn-main{width:auto!important;margin-bottom:0!important}}
   </style>
 </head>
 <body>
@@ -90,8 +105,8 @@
         </div>
       </div>
 
-      <div class="row justify-content-center">
-        <div class="col-lg-11">
+      <div class="row justify-content-center grain-wide-section">
+        <div class="col-lg-12">
           <div class="admin-card">
             <h4>🧬 Sélection isolation → P3 validé → LC validée</h4>
             <div class="grid">
@@ -192,20 +207,26 @@
       </div>
 
 
-      <div class="row justify-content-center">
-        <div class="col-lg-11">
+      <div class="row justify-content-center grain-wide-section">
+        <div class="col-lg-12">
           <div class="admin-card">
             <h4>📋 Historique des lots de semencement grain</h4>
-            <div class="table-responsive grain-history-wrap"><table class="lots-table grain-history-table"><colgroup><col style="width:20%"><col style="width:11%"><col style="width:17%"><col style="width:6%"><col style="width:10%"><col style="width:7%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup><thead><tr><th>Pot/sac</th><th>Date semencement</th><th>Source mycélium</th><th>Grain</th><th>Type / capacité</th><th>Jour</th><th>Propagation</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="units-table-body"><tr><td colspan="9" class="text-center">Chargement...</td></tr></tbody></table></div>
+            <div class="table-responsive grain-history-wrap"><table class="lots-table grain-history-table"><colgroup><col style="width:20%"><col style="width:11%"><col style="width:17%"><col style="width:6%"><col style="width:10%"><col style="width:7%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup><thead><tr><th>Pot/sac</th><th>Date semencement</th><th>Source mycélium</th><th>Grain</th><th>Type / capacité</th><th>Jour</th><th>Propagation</th><th class="grain-status-head"><div class="grain-status-filter-wrap" id="grain-status-filter-wrap"><button type="button" class="grain-status-filter-toggle" id="grain-status-filter-toggle" onclick="toggleGrainStatusFilter(event)">Statut <span>▾</span></button><select id="grain-status-filter" class="grain-status-filter" onchange="applyGrainStatusFilter(this.value)" onclick="event.stopPropagation()"><option value="ALL">Tous les statuts</option></select></div></th><th>Actions</th></tr></thead><tbody id="units-table-body"><tr><td colspan="9" class="text-center">Chargement...</td></tr></tbody></table></div>
           </div>
         </div>
       </div>
 
-      <div class="row justify-content-center">
-        <div class="col-lg-11">
+      <div class="row justify-content-center grain-wide-section">
+        <div class="col-lg-12">
           <div class="admin-card">
             <h4>📋 Lots de préparation grain</h4>
             <div class="table-responsive"><table class="lots-table"><thead><tr><th>Lot</th><th>LC source</th><th>Grain</th><th>Type</th><th>Unités</th><th>Date</th><th>Statut</th></tr></thead><tbody id="batches-table-body"><tr><td colspan="7" class="text-center">Chargement...</td></tr></tbody></table></div>
+            <div class="grain-pagination" id="grain-batch-pagination">
+              <button type="button" class="btn-main btn-grey" id="grain-batch-prev" onclick="changeGrainBatchPage(-1)">← Précédent</button>
+              <span class="grain-pagination-status" id="grain-batch-page-status">Page 1 sur 1</span>
+              <button type="button" class="btn-main btn-green" id="grain-batch-next" onclick="changeGrainBatchPage(1)">Suivant →</button>
+              <div class="grain-pagination-note">10 lots maximum par page</div>
+            </div>
           </div>
         </div>
       </div>
@@ -232,6 +253,9 @@
     let validLcs = [], validP3s = [], batches = [], units = [], protocols = {growth_speed:[],lc_same_isolation:[],needs_growth_protocol:false,needs_lc_protocol:false};
     let selectedIsolationId = 0, selectedP3Id = 0;
     let currentPanel = '', selectedJournalUnit = null, journalEntries = [], selectedDay = 0, pendingPhotoUrl = '';
+    let grainBatchPage = 1;
+    const GRAIN_BATCH_PAGE_SIZE = 10;
+    let grainStatusFilter = 'ALL';
 
     const $ = (id) => document.getElementById(id);
     function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
@@ -547,14 +571,88 @@
     function renderBatches(){
       const rows=filteredBatches();
       const body=$('batches-table-body');
-      if(!rows.length){body.innerHTML='<tr><td colspan="7" class="text-center">Aucun lot de préparation grain pour cette isolation</td></tr>';return;}
-      body.innerHTML=rows.map(b=>`<tr><td><strong>${esc(b.code)}</strong></td><td>${esc(b.lc_code||'—')}<br><small>${esc(b.lc_pot_code||'')}</small></td><td>${esc(b.type_grain||'ble')}</td><td>${esc(b.container_type||'SAC')}</td><td>${Number(b.units_total||0)} total · ${Number(b.units_prepared||0)} dispo · ${Number(b.units_inoculated||0)} semés</td><td>${esc(fmtDate(b.date_preparation))}</td><td>${statusBadge(b.statut)}</td></tr>`).join('')
+      const totalPages=Math.max(1,Math.ceil(rows.length/GRAIN_BATCH_PAGE_SIZE));
+      if(grainBatchPage>totalPages)grainBatchPage=totalPages;
+      if(grainBatchPage<1)grainBatchPage=1;
+      const startIndex=(grainBatchPage-1)*GRAIN_BATCH_PAGE_SIZE;
+      const pageRows=rows.slice(startIndex,startIndex+GRAIN_BATCH_PAGE_SIZE);
+
+      if(!rows.length){
+        body.innerHTML='<tr><td colspan="7" class="text-center">Aucun lot de préparation grain pour cette isolation</td></tr>';
+      }else{
+        body.innerHTML=pageRows.map(b=>`<tr><td><strong>${esc(b.code)}</strong></td><td>${esc(b.lc_code||'—')}<br><small>${esc(b.lc_pot_code||'')}</small></td><td>${esc(b.type_grain||'ble')}</td><td>${esc(b.container_type||'SAC')}</td><td>${Number(b.units_total||0)} total · ${Number(b.units_prepared||0)} dispo · ${Number(b.units_inoculated||0)} semés</td><td>${esc(fmtDate(b.date_preparation))}</td><td>${statusBadge(b.statut)}</td></tr>`).join('');
+      }
+
+      const status=$('grain-batch-page-status');
+      const prev=$('grain-batch-prev');
+      const next=$('grain-batch-next');
+      if(status)status.textContent=`Page ${grainBatchPage} sur ${totalPages}`;
+      if(prev)prev.disabled=grainBatchPage<=1||!rows.length;
+      if(next)next.disabled=grainBatchPage>=totalPages||!rows.length;
     }
+    window.changeGrainBatchPage=function(direction){
+      const rows=filteredBatches();
+      const totalPages=Math.max(1,Math.ceil(rows.length/GRAIN_BATCH_PAGE_SIZE));
+      const next=Math.min(totalPages,Math.max(1,grainBatchPage+Number(direction||0)));
+      if(next===grainBatchPage)return;
+      grainBatchPage=next;
+      renderBatches();
+      $('grain-batch-pagination')?.scrollIntoView({behavior:'smooth',block:'nearest'});
+    };
+
     function isInoculatedUnit(u){return String(u?.statut||'').toUpperCase()!=='PREPARE'||!!u?.inoculated_at}
+    const GRAIN_STATUS_OPTIONS=[
+      ['ENSEMENCE','Ensemencé'],
+      ['EN_INCUBATION','Incubation'],
+      ['PRET','Prêt'],
+      ['STOCK','Stock'],
+      ['EN_STOCK','En stock'],
+      ['STOCKE','Stocké'],
+      ['STOCKEE','Stockée'],
+      ['FRIGO','Frigo'],
+      ['CONTAMINE','Contaminé']
+    ];
+    function grainStatusLabel(value){
+      const key=String(value||'').toUpperCase();
+      const found=GRAIN_STATUS_OPTIONS.find(([v])=>v===key);
+      return found?found[1]:(key||'—').replaceAll('_',' ');
+    }
+    function syncGrainStatusFilterOptions(){
+      const select=$('grain-status-filter');
+      if(!select)return;
+      const known=GRAIN_STATUS_OPTIONS.map(x=>x[0]);
+      const runtime=uniqueList(units,u=>String(u.statut||'').toUpperCase()).filter(v=>v&&v!=='PREPARE'&&!known.includes(v));
+      const options=[...GRAIN_STATUS_OPTIONS,...runtime.map(v=>[v,grainStatusLabel(v)])];
+      select.innerHTML='<option value="ALL">Tous les statuts</option>'+options.map(([value,label])=>`<option value="${esc(value)}">${esc(label)} (${esc(value)})</option>`).join('');
+      if(options.some(([value])=>value===grainStatusFilter))select.value=grainStatusFilter;else{grainStatusFilter='ALL';select.value='ALL';}
+      const btn=$('grain-status-filter-toggle');
+      if(btn)btn.innerHTML=grainStatusFilter==='ALL'?'Statut <span>▾</span>':`Statut : ${esc(grainStatusLabel(grainStatusFilter))} <span>▾</span>`;
+    }
+    window.toggleGrainStatusFilter=function(event){
+      event?.stopPropagation?.();
+      const wrap=$('grain-status-filter-wrap');
+      const select=$('grain-status-filter');
+      if(!wrap||!select)return;
+      wrap.classList.toggle('open');
+      if(wrap.classList.contains('open')){
+        select.focus();
+        if(typeof select.showPicker==='function'){
+          try{select.showPicker();}catch(_){/* fallback: select remains visible */}
+        }
+      }
+    };
+    window.applyGrainStatusFilter=function(value){
+      grainStatusFilter=String(value||'ALL').toUpperCase();
+      $('grain-status-filter-wrap')?.classList.remove('open');
+      syncGrainStatusFilterOptions();
+      renderUnits();
+    };
+
     function renderUnits(){
       const body=$('units-table-body');
-      const inoc=filteredUnits().filter(isInoculatedUnit);
-      if(!inoc.length){body.innerHTML='<tr><td colspan="9" class="text-center">Aucun pot/sac ensemencé pour le moment</td></tr>';return;}
+      syncGrainStatusFilterOptions();
+      const inoc=filteredUnits().filter(isInoculatedUnit).filter(u=>grainStatusFilter==='ALL'||String(u.statut||'').toUpperCase()===grainStatusFilter);
+      if(!inoc.length){body.innerHTML=`<tr><td colspan="9" class="text-center">${grainStatusFilter==='ALL'?'Aucun pot/sac ensemencé pour le moment':'Aucun pot/sac avec le statut '+esc(grainStatusLabel(grainStatusFilter))}</td></tr>`;return;}
 
       // Regroupement uniquement par source mycélium : même LC / même pot LC / même P3.
       // On n'ajoute plus de ligne résumé : le groupe est séparé visuellement et la source est affichée une seule fois.
@@ -607,7 +705,7 @@
     function updateCreatePreview(){const cap=Number($('capacity-final')?.value||0), nb=Number($('nb-units')?.value||0), wheat=Number($('wheat-kg')?.value||0), water=Number($('water-l')?.value||0);const extras=readExtraCompositions();const box=$('create-preview'); if(!cap||!nb){box.textContent='Renseigne la capacité et le nombre de pots/sacs.';return;}const extraText=extras.length?'<br>Autres compositions : '+extras.map(x=>`<strong>${esc(x.name)}</strong> ${x.quantity} ${esc(x.unit)}`).join(' · '):'';box.innerHTML=`Préparation : <strong>${nb}</strong> unité(s). Capacité finale cible : <strong>${cap.toFixed(2)} kg/unité</strong>.<br>Base : <strong>${wheat||0} kg blé</strong> / <strong>${water||0} L eau</strong>.${extraText}`;}
     function syncContainerChoice(active){const sac=$('container-sac'), pot=$('container-pot'); if(active==='POT'){pot.checked=true;sac.checked=false}else{sac.checked=true;pot.checked=false}$('choice-sac')?.classList.toggle('checked',sac.checked);$('choice-pot')?.classList.toggle('checked',pot.checked)}
 
-    async function createBatch(){const iso=selectedIsolation(); if(!iso)return alert('Sélectionne une isolation.'); const payload={parent_iso_id:iso,type_grain:'ble',container_type:$('container-pot')?.checked?'POT':'SAC',capacity_final_kg:Number($('capacity-final').value||0),wheat_kg:Number($('wheat-kg').value||0),water_l:Number($('water-l').value||0),additional_components:readExtraCompositions(),nb_units:Number($('nb-units').value||1),date_preparation:$('date-preparation').value||today(),notes:$('create-notes').value||''}; if(!payload.capacity_final_kg||!payload.wheat_kg||payload.water_l<0||!payload.nb_units)return alert('Complète la capacité, la composition blé/eau et le nombre de pots/sacs.'); const incomplete=Array.from(document.querySelectorAll('.extra-composition-row')).some(row=>{const n=String(row.querySelector('.extra-component-name')?.value||'').trim();const q=Number(row.querySelector('.extra-component-qty')?.value||0);return (n&&!q)||(!n&&q)});if(incomplete)return alert('Complète le nom et la quantité de chaque composition ajoutée, ou retire la ligne incomplète.'); try{const r=await postJSON('/api/grain-batches',payload);alert(`✅ Lot créé : ${r.code}
+    async function createBatch(){const iso=selectedIsolation(); if(!iso)return alert('Sélectionne une isolation.'); const payload={parent_iso_id:iso,type_grain:'ble',container_type:$('container-pot')?.checked?'POT':'SAC',capacity_final_kg:Number($('capacity-final').value||0),wheat_kg:Number($('wheat-kg').value||0),water_l:Number($('water-l').value||0),additional_components:readExtraCompositions(),nb_units:Number($('nb-units').value||1),date_preparation:$('date-preparation').value||today(),notes:$('create-notes').value||''}; if(!payload.capacity_final_kg||!payload.wheat_kg||payload.water_l<0||!payload.nb_units)return alert('Complète la capacité, la composition blé/eau et le nombre de pots/sacs.'); const incomplete=Array.from(document.querySelectorAll('.extra-composition-row')).some(row=>{const n=String(row.querySelector('.extra-component-name')?.value||'').trim();const q=Number(row.querySelector('.extra-component-qty')?.value||0);return (n&&!q)||(!n&&q)});if(incomplete)return alert('Complète le nom et la quantité de chaque composition ajoutée, ou retire la ligne incomplète.'); try{const r=await postJSON('/api/grain-batches',payload);grainBatchPage=1;alert(`✅ Lot créé : ${r.code}
 Unités générées : ${r.units?.length||payload.nb_units}`);await loadAll();showPanel('panel-seed')}catch(e){alert('❌ '+apiErrorMessage(e))}}
     async function seedUnits(){const lc=selectedLcFromSelect('seed-lc-select')||selectedLcFromSelect('main-lc-select'); if(!lc)return alert('Sélectionne une LC validée à injecter.'); const ids=Array.from(document.querySelectorAll('.seed-unit-check:checked')).map(x=>Number(x.value)).filter(Boolean); if(!ids.length)return alert('Coche les pots/sacs à ensemencer.'); const vol=Number($('seed-volume').value||0); if(!vol)return alert('Indique le volume de LC par pot/sac.'); const semisDate=$('seed-date').value||today(); const semisDateTime=makeSemisDateTime(semisDate); const selectedBeforePrint=ids.map(id=>{const u=units.find(x=>Number(x.id)===Number(id))||{};return {...u, lc_lot_id:lc.lc_lot_id, lc_pot_id:lc.lc_pot_id, lc_code:lc.lc_code, lc_pot_code:lc.lc_pot_code, source_petri_id:lc.source_petri_id||u.source_petri_id, p3_code:lc.p3_code||u.p3_code, inoculated_at:semisDateTime, inoculation_created_at:semisDateTime, inoculation_volume_ml:vol, statut:'ENSEMENCE'};}); try{const r=await postJSON('/api/grain-inoculations',{lc_lot_id:lc.lc_lot_id,lc_pot_id:lc.lc_pot_id,unit_ids:ids,inoculation_volume_ml:vol,date_inoculation:semisDate,date_inoculation_datetime:semisDateTime,notes:$('seed-notes').value||''}); if(selectedBeforePrint.length)printGrainUnitLabels(selectedBeforePrint); alert(`✅ Semencement enregistré : ${r.code}\nPots/sacs ensemencés : ${r.nb_units}\nLes étiquettes viennent de s’ouvrir pour impression.`);await loadAll();showPanel('panel-seed')}catch(e){alert('❌ '+apiErrorMessage(e))}}
 
@@ -634,7 +732,7 @@ Unités générées : ${r.units?.length||payload.nb_units}`);await loadAll();sho
       $('btn-show-seed')?.addEventListener('click',()=>showPanel('panel-seed'));
       $('btn-show-protocol')?.addEventListener('click',()=>showPanel('panel-protocol'));
       $('btn-print-selected-labels')?.addEventListener('click',printCurrentGrainLabels);
-      $('isolation-select')?.addEventListener('change',()=>{selectedIsolationId=Number($('isolation-select').value||0);selectedP3Id=0;['main-lc-select','create-lc-select','seed-lc-select'].forEach(id=>{const el=$(id);if(el)el.value='';});syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();});
+      $('isolation-select')?.addEventListener('change',()=>{selectedIsolationId=Number($('isolation-select').value||0);selectedP3Id=0;grainBatchPage=1;['main-lc-select','create-lc-select','seed-lc-select'].forEach(id=>{const el=$(id);if(el)el.value='';});syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();});
       $('main-lc-select')?.addEventListener('change',()=>{const v=$('main-lc-select').value;if($('create-lc-select'))$('create-lc-select').value=v;if($('seed-lc-select'))$('seed-lc-select').value=v;updateLcActionState();renderValidLcs();});
       $('container-sac').addEventListener('change',()=>syncContainerChoice('SAC'));
       $('container-pot').addEventListener('change',()=>syncContainerChoice('POT'));
@@ -643,6 +741,7 @@ Unités générées : ${r.units?.length||payload.nb_units}`);await loadAll();sho
       $('btn-add-composition')?.addEventListener('click',()=>addCompositionRow());
       $('btn-create-batch').addEventListener('click',createBatch);
       $('btn-seed-units').addEventListener('click',seedUnits);
+      document.addEventListener('click',event=>{if(!event.target.closest('#grain-status-filter-wrap'))$('grain-status-filter-wrap')?.classList.remove('open');});
       loadAll().then(()=>handleInitialGrainRoute());
     });
   })();
