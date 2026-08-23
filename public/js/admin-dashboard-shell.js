@@ -15,7 +15,8 @@
     'admin-souches.html':{icon:'sprout',title:'Souches',subtitle:'Bibliothèque biologique, certification, provenance, échéances et disponibilité.'},
     'admin-souche-journal.html':{icon:'dna',title:'Journal de souche',subtitle:'Historique et traçabilité détaillée de la souche sélectionnée.'},
     'admin-taches.html':{icon:'clipboard-check',title:'Tâches obligatoires',subtitle:'Contrôles réellement dus aujourd’hui, retards et échéances calculés depuis la base.'},
-    'admin-users.html':{icon:'users',title:'Gestion des utilisateurs',subtitle:'Comptes, rôles, activité de production et approbations sensibles.'},
+    'admin-users.html':{icon:'users',title:'Gestion des utilisateurs',subtitle:'Comptes, rôles, état d’accès et activité de production.'},
+    'admin-approvals.html':{icon:'shield-check',title:'Demandes d’approbation',subtitle:'Validez les opérations sensibles soumises par les opérateurs.'},
     'change-password.html':{icon:'key-round',title:'Sécurité du compte',subtitle:'Mise à jour du mot de passe utilisateur.'}
   };
 
@@ -27,18 +28,17 @@
   }[page]||page;
 
   const navSections=[
-    {label:'',items:[['admin.html','layout-dashboard','Tableau de bord']]},
+    {label:'TABLEAU DE BORD',items:[['admin.html','layout-dashboard','Tableau de bord']]},
     {label:'GESTION',items:[
+      ['admin-users.html','users','Utilisateurs','admin'],
+      ['admin-taches.html','clipboard-check','Tâches obligatoires'],
       ['admin-isolement.html','flask-conical','Isolement tissulaire'],
       ['admin-myc-liquide.html','beaker','Mycélium liquide (LC)'],
       ['admin-myc-grain.html','wheat','Mycélium sur grain'],
-      ['admin-souches.html','sprout','Souches'],
-      ['admin-taches.html','clipboard-check','Tâches obligatoires']
+      ['admin-souches.html','sprout','Souches']
     ]},
-    {label:'ADMINISTRATION',admin:true,items:[
-      ['admin-users.html','users','Utilisateurs','admin'],
-      ['admin-users.html?view=approvals','shield-check','Demandes d’approbation','admin'],
-      ['admin-users.html?view=activity','activity','Activité production','admin']
+    {label:'APPROBATIONS',admin:true,items:[
+      ['admin-approvals.html','shield-check','Demandes d’approbation','admin']
     ]}
   ];
 
@@ -62,10 +62,10 @@
     sidebar.innerHTML=`
       <a class="mtd-shell-brand" href="admin.html">
         <img src="images/logo-agro.jpeg" alt="Mycelium Tech Digital">
-        <span><strong>MYCELIUM</strong><small>TECH DIGITAL</small></span>
+        <span><strong>Biotech Agro</strong><small>ADMINISTRATION</small></span>
       </a>
       <nav class="mtd-shell-nav">
-        ${navSections.map(section=>`<div class="mtd-shell-nav-section"${section.admin?' data-mtd-admin-section hidden':''}>${section.label?`<div class="mtd-shell-nav-label">${section.label}</div>`:''}${section.items.map(([href,icon,label,role])=>{const base=href.split('?')[0];const params=new URLSearchParams(href.split('?')[1]||'');const view=params.get('view')||'';const currentView=new URLSearchParams(location.search||'').get('view')||'';const active=activeNavPage===base&&((base!=='admin-users.html')||(view?currentView===view:!currentView));return `<a href="${href}"${active?' class="active"':''}${role?' data-mtd-admin-link hidden':''}>${iconMarkup(icon)}<span>${label}</span>${view==='approvals'?'<span class="mtd-nav-count" id="mtd-nav-approval-count" hidden>0</span>':''}</a>`}).join('')}</div>`).join('')}
+        ${navSections.map(section=>`<div class="mtd-shell-nav-section"${section.admin?' data-mtd-admin-section hidden':''}>${section.label?`<div class="mtd-shell-nav-label">${section.label}</div>`:''}${section.items.map(([href,icon,label,role])=>{const base=href.split('?')[0];const active=activeNavPage===base;return `<a href="${href}"${active?' class="active"':''}${role?' data-mtd-admin-link hidden':''}>${iconMarkup(icon)}<span>${label}</span>${base==='admin-approvals.html'?'<span class="mtd-nav-count" id="mtd-nav-approval-count" hidden>0</span>':''}</a>`}).join('')}</div>`).join('')}
       </nav>
       <section class="mtd-shell-system" id="mtd-shell-system">
         <div class="mtd-shell-system-head"><span>État du système</span><small id="mtd-system-time">—</small></div>
@@ -83,13 +83,13 @@
         <div class="mtd-shell-search-results" id="mtd-search-results"></div>
       </div>
       <span class="mtd-shell-spacer"></span>
-      <button class="mtd-shell-icon" id="mtd-shell-bell" type="button" title="Demandes de suppression" aria-label="Demandes de suppression" hidden>${iconMarkup('bell')}<span class="mtd-shell-badge" id="mtd-shell-badge" hidden>0</span></button>
+      <button class="mtd-shell-icon" id="mtd-shell-bell" type="button" title="Demandes d’approbation" aria-label="Demandes d’approbation" hidden>${iconMarkup('bell')}<span class="mtd-shell-badge" id="mtd-shell-badge" hidden>0</span></button>
       <div class="mtd-shell-profile"><img src="images/logo-agro.jpeg" alt=""><span><strong id="mtd-shell-name">Utilisateur</strong><small id="mtd-shell-role">Connexion…</small></span></div>
       <button class="mtd-shell-logout" type="button" title="Déconnexion" aria-label="Déconnexion">${iconMarkup('log-out')}</button>`;
 
     const notifications=document.createElement('section');
     notifications.className='mtd-shell-notifications';notifications.id='mtd-shell-notifications';
-    notifications.innerHTML='<h3>Demandes d’approbation</h3><div id="mtd-shell-request-list"><div class="mtd-shell-empty">Chargement…</div></div><a href="admin-users.html?view=approvals" class="mtd-shell-review">Gérer toutes les demandes</a>';
+    notifications.innerHTML='<h3>Demandes d’approbation</h3><div id="mtd-shell-request-list"><div class="mtd-shell-empty">Chargement…</div></div><a href="admin-approvals.html" class="mtd-shell-review">Gérer toutes les demandes</a>';
 
     document.body.prepend(overlay,sidebar,top,notifications);
     window.lucide?.createIcons();
@@ -109,7 +109,7 @@
   }
 
   function pageHost(){
-    return document.querySelector('.admin-wrapper .container,.wrapper .container,main.wrap,main.password-page,section.wrapper .container,body>.container');
+    return document.querySelector('.admin-wrapper .container,.wrapper .container,main.wrap,main.approvals-wrap,main.password-page,section.wrapper .container,body>.container');
   }
 
   function injectPageHeader(){

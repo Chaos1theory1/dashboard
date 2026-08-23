@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Demandes d’approbation — Mycelium Tech Digital</title>
+  <link rel="icon" href="images/logo.png" type="image/png">
+  <link rel="stylesheet" href="css/bootstrap.css">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    :root{--green:#2fa35a;--green-dark:#1f7a41;--blue:#2d6cdf;--amber:#e59a18;--red:#d9493f;--purple:#7856c8;--line:#e2e9e3;--muted:#6f7d73;--text:#17221b;--soft:#f7faf8}
+    body{background:#f4f7f4;color:var(--text)}
+    .admin-big-logo{text-align:center;padding:12px;background:#315947}.admin-big-logo img{width:92px;height:92px;border-radius:50%;background:#fff;border:4px solid var(--green)}
+    .admin-menu-bar{background:#fff;padding:15px 0;border-bottom:2px solid #e5e5e5;text-align:center}.admin-menu-bar a{margin:0 12px;font-weight:700;text-transform:uppercase;font-size:12px;text-decoration:none;color:#444}.admin-menu-bar a.active{color:var(--green)}
+    .approvals-wrap{max-width:1450px;margin:0 auto;padding:22px 18px 45px}.legacy-title{display:none}
+    .approval-stats{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;margin-bottom:18px}.approval-stat{display:flex;align-items:center;gap:13px;min-height:104px;padding:17px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:0 6px 18px rgba(18,48,28,.04)}.approval-stat-icon{display:grid;place-items:center;width:48px;height:48px;border-radius:15px;font-weight:900;font-size:18px}.approval-stat strong{display:block;font-size:28px;line-height:1;color:var(--text)}.approval-stat span{display:block;margin-top:6px;font-size:12px;font-weight:800}.approval-stat small{display:block;margin-top:4px;color:var(--muted);font-size:10px}.approval-stat.total .approval-stat-icon{background:#e8f7ec;color:#237e45}.approval-stat.petri .approval-stat-icon{background:#e8f7ec;color:#237e45}.approval-stat.lc .approval-stat-icon{background:#eaf2ff;color:#2d6cdf}.approval-stat.grain .approval-stat-icon{background:#fff4df;color:#d88d0c}.approval-stat.strain .approval-stat-icon{background:#f2eaff;color:#7856c8}
+    .approval-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 8px 25px rgba(18,48,28,.05)}
+    .approval-toolbar{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;margin-bottom:15px}.approval-tabs{display:flex;gap:7px;flex-wrap:wrap}.approval-tab{border:1px solid #e1e8e3;background:#fff;color:#4e5e54;border-radius:10px;padding:9px 13px;font-size:11px;font-weight:800;cursor:pointer}.approval-tab.active{background:#edf8f1;color:#237e45;border-color:#9ed3ae;box-shadow:0 3px 10px rgba(47,159,87,.08)}.approval-tab-count{display:inline-grid;place-items:center;min-width:21px;height:21px;margin-left:5px;padding:0 5px;border-radius:999px;background:#edf2ee;color:#506057;font-size:9px}.approval-tab.active .approval-tab-count{background:#d8f2e0;color:#176e38}.refresh-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:10px;background:#fff;color:#4d5b52;padding:9px 12px;font-weight:800;font-size:11px;cursor:pointer}
+    .approval-filters{display:grid;grid-template-columns:minmax(260px,1.4fr) minmax(190px,.8fr) minmax(190px,.8fr);gap:11px;padding:15px;margin-bottom:14px;border:1px solid #edf1ee;border-radius:13px;background:#fbfdfb}.approval-filters label{margin:0;font-size:10px;font-weight:800;color:#5a695f}.approval-filters input,.approval-filters select{width:100%;margin-top:5px;padding:10px 11px;border:1px solid #d5e0d8;border-radius:10px;background:#fff;font-size:12px}
+    .approval-table-wrap{overflow:auto}.approval-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}.approval-table th{padding:11px 10px;background:#f3f6f4;color:#66746b;text-transform:uppercase;letter-spacing:.05em;font-size:9px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.approval-table th:first-child{border-left:1px solid var(--line);border-radius:10px 0 0 10px}.approval-table th:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}.approval-table td{padding:12px 10px;border-bottom:1px solid #edf1ee;vertical-align:middle}.approval-title-cell{display:flex;align-items:center;gap:11px;min-width:260px}.approval-icon{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:50%;font-weight:900}.approval-icon.petri{background:#e6f6eb;color:#237e45}.approval-icon.lc{background:#eaf2ff;color:#2d6cdf}.approval-icon.grain{background:#fff3d7;color:#c57d00}.approval-icon.strains{background:#f1e8ff;color:#7856c8}.approval-icon.other{background:#eef2ef;color:#5d6b62}.approval-title-cell strong{display:block;font-size:12px;color:#202b23}.approval-title-cell small{display:block;margin-top:3px;color:var(--muted);font-size:10px;line-height:1.35}.type-pill,.pending-pill{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:9px;font-weight:800;white-space:nowrap}.type-pill.petri{background:#e6f6eb;color:#237e45}.type-pill.lc{background:#eaf2ff;color:#2d6cdf}.type-pill.grain{background:#fff3d7;color:#a86c00}.type-pill.strains{background:#f1e8ff;color:#6842ad}.type-pill.other{background:#edf1ee;color:#556158}.pending-pill{background:#fff3d7;color:#9a6700}.approval-actions{display:flex;gap:6px;white-space:nowrap}.icon-btn{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:9px;color:#fff;font-weight:900;cursor:pointer}.icon-btn.approve{background:#239b56}.icon-btn.reject{background:#dc3d36}.icon-btn.view{background:#fff;color:#506057;border:1px solid #dce5de}.icon-btn:hover{filter:brightness(.97);transform:translateY(-1px)}
+    .approval-empty{text-align:center;padding:42px 20px;color:var(--muted)}.approval-pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:16px;color:var(--muted);font-size:11px}.approval-pages{display:flex;align-items:center;gap:6px}.page-btn{min-width:33px;height:33px;border:1px solid #dfe7e1;border-radius:9px;background:#fff;color:#536158;font-size:11px;font-weight:800;cursor:pointer}.page-btn.active{background:#239b56;color:#fff;border-color:#239b56}.page-btn:disabled{opacity:.4;cursor:not-allowed}
+    .approval-warning{display:none;margin:0 0 14px;padding:10px 12px;border:1px solid #eedbaf;border-radius:10px;background:#fff8e8;color:#72550d;font-size:11px}
+    .approval-modal{position:fixed;z-index:12000;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(10,25,16,.45)}.approval-modal.open{display:flex}.approval-modal-card{width:min(880px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 26px 80px rgba(0,0,0,.25)}.approval-modal-head{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:18px 20px;border-bottom:1px solid var(--line);background:#fff}.approval-modal-head h3{margin:0;font-size:19px}.approval-modal-head p{margin:4px 0 0;color:var(--muted);font-size:11px}.approval-modal-close{width:36px;height:36px;border:0;border-radius:10px;background:#eef3ef;color:#4f5e54;font-size:21px;cursor:pointer}.approval-modal-body{padding:20px}.approval-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:10px;margin-bottom:16px}.detail-box{padding:11px;border:1px solid #e5ebe7;border-radius:10px;background:#f9fbfa}.detail-box span{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;font-weight:800;letter-spacing:.05em}.detail-box strong{display:block;margin-top:4px;font-size:12px}.reason-box{padding:13px;border-radius:11px;background:#fff5f2;border:1px solid #f4ddd8;white-space:pre-wrap;font-size:12px}.evidence-box{margin-top:14px;padding:12px;border:1px dashed #cbd8cf;border-radius:12px;text-align:center;background:#fbfdfb}.evidence-box img{max-width:100%;max-height:360px;border-radius:10px}.cert-grid{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:11px}.cert-grid label{font-size:10px;font-weight:800;color:#536158}.cert-grid input,.cert-grid textarea{width:100%;margin-top:5px;padding:10px;border:1px solid #d5e0d8;border-radius:9px}.cert-grid textarea{min-height:78px}.cert-grid .full{grid-column:1/-1}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.modal-action{border:0;border-radius:9px;padding:10px 14px;color:#fff;font-weight:800;cursor:pointer}.modal-action.approve{background:#239b56}.modal-action.reject{background:#dc3d36}.modal-action.cancel{background:#667085}
+    @media(max-width:1050px){.approval-stats{grid-template-columns:repeat(2,minmax(150px,1fr))}.approval-filters{grid-template-columns:1fr}.approval-detail-grid,.cert-grid{grid-template-columns:1fr 1fr}}
+    @media(max-width:650px){.approval-stats,.approval-detail-grid,.cert-grid{grid-template-columns:1fr}.approval-pagination{align-items:flex-start;flex-direction:column}.approval-table{min-width:900px}}
+  </style>
+</head>
+<body>
+  <script src="js/admin-auth.js"></script>
+  <div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro"></div>
+  <div class="admin-menu-bar"><a href="admin.html">Tableau de bord</a><a href="admin-users.html">Utilisateurs</a><a href="admin-taches.html">Tâches obligatoires</a><a href="admin-souches.html">Souches</a><a href="admin-isolement.html">Isolement tissulaire</a><a href="admin-myc-liquide.html">Mycélium liquide</a><a href="admin-myc-grain.html">Mycélium sur grain</a></div>
+
+  <main class="approvals-wrap">
+    <h1 class="legacy-title">Demandes d’approbation</h1>
+
+    <section class="approval-stats" aria-label="Résumé des demandes">
+      <div class="approval-stat total"><span class="approval-stat-icon">✓</span><div><strong id="stat-all">0</strong><span>En attente</span><small>Toutes les demandes</small></div></div>
+      <div class="approval-stat petri"><span class="approval-stat-icon">P</span><div><strong id="stat-petri">0</strong><span>Boîtes de Pétri</span><small>Suppressions et photos</small></div></div>
+      <div class="approval-stat lc"><span class="approval-stat-icon">LC</span><div><strong id="stat-lc">0</strong><span>Solution liquide</span><small>Pots, lots et photos LC</small></div></div>
+      <div class="approval-stat grain"><span class="approval-stat-icon">G</span><div><strong id="stat-grain">0</strong><span>Mycélium sur grain</span><small>Demandes grain disponibles</small></div></div>
+      <div class="approval-stat strain"><span class="approval-stat-icon">S</span><div><strong id="stat-strains">0</strong><span>Souches</span><small>Créations et certifications</small></div></div>
+    </section>
+
+    <section class="approval-card">
+      <div class="approval-toolbar">
+        <div class="approval-tabs" role="tablist" aria-label="Filtres d’approbation">
+          <button class="approval-tab active" type="button" data-category="all" onclick="setApprovalCategory('all')">Toutes <span class="approval-tab-count" id="tab-all">0</span></button>
+          <button class="approval-tab" type="button" data-category="petri" onclick="setApprovalCategory('petri')">Boîte Pétri <span class="approval-tab-count" id="tab-petri">0</span></button>
+          <button class="approval-tab" type="button" data-category="lc" onclick="setApprovalCategory('lc')">Solution liquide <span class="approval-tab-count" id="tab-lc">0</span></button>
+          <button class="approval-tab" type="button" data-category="grain" onclick="setApprovalCategory('grain')">Mycélium sur grain <span class="approval-tab-count" id="tab-grain">0</span></button>
+          <button class="approval-tab" type="button" data-category="strains" onclick="setApprovalCategory('strains')">Souches <span class="approval-tab-count" id="tab-strains">0</span></button>
+        </div>
+        <button class="refresh-btn" id="approval-refresh" type="button" onclick="loadApprovals()">↻ Actualiser</button>
+      </div>
+
+      <div class="approval-filters">
+        <label>Rechercher une demande<input id="approval-search" type="search" placeholder="Référence, utilisateur, souche, LC…" oninput="resetApprovalPageAndRender()"></label>
+        <label>Type de demande<select id="approval-type-filter" onchange="resetApprovalPageAndRender()"><option value="">Tous les types</option></select></label>
+        <label>Soumis par<select id="approval-user-filter" onchange="resetApprovalPageAndRender()"><option value="">Tous les opérateurs</option></select></label>
+      </div>
+
+      <div class="approval-warning" id="approval-warning"></div>
+      <div class="approval-table-wrap">
+        <table class="approval-table">
+          <thead><tr><th>Demande</th><th>Type</th><th>Soumis par</th><th>Date soumission</th><th>Statut</th><th>Actions</th></tr></thead>
+          <tbody id="approval-body"><tr><td colspan="6" class="approval-empty">Chargement des demandes…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="approval-pagination">
+        <span id="approval-range">0 demande</span>
+        <div class="approval-pages" id="approval-pages"></div>
+        <label>Affichage <select id="approval-page-size" onchange="setApprovalPageSize(this.value)" style="margin-left:5px;border:1px solid #dce5de;border-radius:8px;padding:7px"><option value="5" selected>5 / page</option><option value="10">10 / page</option><option value="20">20 / page</option></select></label>
+      </div>
+    </section>
+  </main>
+
+  <div class="approval-modal" id="approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-modal-title">
+    <div class="approval-modal-card">
+      <div class="approval-modal-head"><div><h3 id="approval-modal-title">Détail de la demande</h3><p id="approval-modal-subtitle"></p></div><button type="button" class="approval-modal-close" onclick="closeApprovalDetails()" aria-label="Fermer">×</button></div>
+      <div class="approval-modal-body" id="approval-modal-body"></div>
+    </div>
+  </div>
+
+  <script>
+    const approvalState={rows:[],category:'all',page:1,pageSize:5};
+    const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fmt=d=>d?new Date(d).toLocaleString('fr-FR'):'—';
+    async function api(path,options={}){const r=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'Erreur API');return data}
+    function normalizePhotoCategory(value){const v=String(value||'').toLowerCase();if(v.includes('grain'))return 'grain';if(v.includes('lc')||v.includes('liquide'))return 'lc';if(v.includes('petri')||v.includes('pétri')||v.includes('iso'))return 'petri';return 'other'}
+    function categoryLabel(cat){return cat==='petri'?'Boîte Pétri':cat==='lc'?'Solution liquide':cat==='grain'?'Mycélium sur grain':cat==='strains'?'Souches':'Autre'}
+    function categoryIcon(cat){return cat==='petri'?'P':cat==='lc'?'LC':cat==='grain'?'G':cat==='strains'?'S':'•'}
+    function actorOf(row){return row.requested_by_name||row.actor_name||row.requested_by||'Opérateur'}
+    function whenOf(row){return row.requested_at||row.created_at||row.updated_at||null}
+
+    function makeRecord(kind,row){
+      if(kind==='petri-delete')return{key:`petri:${row.id}`,kind,category:'petri',title:row.petri_code||`Petri ID ${row.petri_id}`,subtitle:`Suppression boîte P${row.phase||'—'}${row.reason?' · '+row.reason:''}`,type:'Suppression boîte Pétri',actor:actorOf(row),date:whenOf(row),raw:row};
+      if(kind==='lc-delete'){const lot=String(row.resource_type)==='lot';const title=lot?(row.lot_code||`Lot LC #${row.lc_lot_id}`):(row.pot_code||`Pot LC #${row.lc_pot_id}`);return{key:`lc:${row.id}`,kind,category:'lc',title,subtitle:`${lot?'Suppression lot LC':'Suppression pot LC'}${row.reason?' · '+row.reason:''}`,type:lot?'Suppression lot LC':'Suppression pot LC',actor:actorOf(row),date:whenOf(row),raw:row}}
+      if(kind==='photo-delete'){const cat=normalizePhotoCategory(row.photo_type);return{key:`photo:${row.id}`,kind,category:cat,title:`Photo #${row.photo_record_id}`,subtitle:`Suppression photo ${String(row.photo_type||'').toUpperCase()}`,type:'Suppression photo',actor:actorOf(row),date:whenOf(row),raw:row}}
+      if(kind==='strain-create'){const p=row.payload||{};return{key:`strain-create:${row.id}`,kind,category:'strains',title:p.code||row.requested_code||'Souche externe',subtitle:`Création souche externe · ${p.name||p.species||''}`,type:'Création souche externe',actor:actorOf(row),date:whenOf(row),raw:row}}
+      if(kind==='strain-cert'){return{key:`strain-cert:${row.id}`,kind,category:'strains',title:row.strain_code||'Souche',subtitle:`Certification${row.strain_name?' · '+row.strain_name:''}`,type:'Certification souche',actor:actorOf(row),date:whenOf(row),raw:row}}
+      return null;
+    }
+
+    async function loadApprovals(){
+      const btn=document.getElementById('approval-refresh');btn.disabled=true;
+      document.getElementById('approval-body').innerHTML='<tr><td colspan="6" class="approval-empty">Chargement des demandes…</td></tr>';
+      const endpoints=[
+        ['photo-delete','/api/admin/photo-deletion-requests'],
+        ['petri-delete','/api/admin/petri-deletion-requests'],
+        ['lc-delete','/api/admin/lc-deletion-requests'],
+        ['strain-create','/api/strain-creation-requests'],
+        ['strain-cert','/api/strain-certification-requests']
+      ];
+      try{
+        const settled=await Promise.allSettled(endpoints.map(([,url])=>api(url)));
+        const rows=[],warnings=[];
+        settled.forEach((result,index)=>{
+          const [kind,url]=endpoints[index];
+          if(result.status!=='fulfilled'){warnings.push(url);return}
+          let list=Array.isArray(result.value)?result.value:[];
+          if(kind!=='strain-cert')list=list.filter(x=>String(x.status||'pending').toLowerCase()==='pending');
+          list.forEach(row=>{const record=makeRecord(kind,row);if(record)rows.push(record)});
+        });
+        rows.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+        approvalState.rows=rows;approvalState.page=1;
+        updateCounts();populateFilters();renderApprovals();
+        const warning=document.getElementById('approval-warning');if(warnings.length){warning.style.display='block';warning.textContent='Certaines sources d’approbation ne sont pas disponibles : '+warnings.join(' · ')}else{warning.style.display='none';warning.textContent=''}
+      }finally{btn.disabled=false}
+    }
+
+    function updateCounts(){const counts={all:approvalState.rows.length,petri:0,lc:0,grain:0,strains:0};approvalState.rows.forEach(r=>{if(counts[r.category]!==undefined)counts[r.category]++});Object.entries(counts).forEach(([key,value])=>{for(const prefix of ['stat-','tab-']){const el=document.getElementById(prefix+key);if(el)el.textContent=value}})}
+    function populateFilters(){const type=document.getElementById('approval-type-filter'),user=document.getElementById('approval-user-filter'),oldType=type.value,oldUser=user.value;const types=[...new Set(approvalState.rows.map(r=>r.type))].sort((a,b)=>a.localeCompare(b,'fr'));const users=[...new Set(approvalState.rows.map(r=>r.actor).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));type.innerHTML='<option value="">Tous les types</option>'+types.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');user.innerHTML='<option value="">Tous les opérateurs</option>'+users.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');if(types.includes(oldType))type.value=oldType;if(users.includes(oldUser))user.value=oldUser}
+    function filteredApprovals(){const search=String(document.getElementById('approval-search').value||'').trim().toLowerCase(),type=document.getElementById('approval-type-filter').value,user=document.getElementById('approval-user-filter').value;return approvalState.rows.filter(r=>{if(approvalState.category!=='all'&&r.category!==approvalState.category)return false;if(type&&r.type!==type)return false;if(user&&r.actor!==user)return false;if(search){const hay=[r.title,r.subtitle,r.type,r.actor,categoryLabel(r.category)].join(' ').toLowerCase();if(!hay.includes(search))return false}return true})}
+    function setApprovalCategory(cat){approvalState.category=['all','petri','lc','grain','strains'].includes(cat)?cat:'all';approvalState.page=1;document.querySelectorAll('.approval-tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.category===approvalState.category));renderApprovals()}
+    function resetApprovalPageAndRender(){approvalState.page=1;renderApprovals()}
+    function setApprovalPageSize(value){approvalState.pageSize=Math.max(1,Number(value)||5);approvalState.page=1;renderApprovals()}
+    function goApprovalPage(page){const total=Math.max(1,Math.ceil(filteredApprovals().length/approvalState.pageSize));approvalState.page=Math.min(total,Math.max(1,page));renderApprovals()}
+
+    function renderApprovals(){const rows=filteredApprovals(),total=rows.length,pages=Math.max(1,Math.ceil(total/approvalState.pageSize));if(approvalState.page>pages)approvalState.page=pages;const start=(approvalState.page-1)*approvalState.pageSize,end=Math.min(total,start+approvalState.pageSize),visible=rows.slice(start,end);const body=document.getElementById('approval-body');body.innerHTML=visible.length?visible.map(r=>`<tr><td><div class="approval-title-cell"><span class="approval-icon ${esc(r.category)}">${esc(categoryIcon(r.category))}</span><span><strong>${esc(r.title)}</strong><small>${esc(r.subtitle||'')}</small></span></div></td><td><span class="type-pill ${esc(r.category)}">${esc(r.type)}</span></td><td><strong>${esc(r.actor)}</strong><br><small>Opérateur</small></td><td>${esc(fmt(r.date))}</td><td><span class="pending-pill">En attente</span></td><td><div class="approval-actions"><button class="icon-btn approve" type="button" title="Approuver" onclick="approveRequest('${esc(r.key)}')">✓</button><button class="icon-btn reject" type="button" title="Refuser" onclick="rejectRequest('${esc(r.key)}')">×</button><button class="icon-btn view" type="button" title="Voir les détails" onclick="openApprovalDetails('${esc(r.key)}')">◉</button></div></td></tr>`).join(''):'<tr><td colspan="6" class="approval-empty">Aucune demande correspondant à ce filtre.</td></tr>';
+      document.getElementById('approval-range').textContent=total?`Affichage de ${start+1} à ${end} sur ${total} demande${total>1?'s':''}`:'0 demande';
+      const pagesBox=document.getElementById('approval-pages');let html=`<button class="page-btn" ${approvalState.page<=1?'disabled':''} onclick="goApprovalPage(${approvalState.page-1})">‹</button>`;const from=Math.max(1,approvalState.page-2),to=Math.min(pages,from+4);for(let p=from;p<=to;p++)html+=`<button class="page-btn ${p===approvalState.page?'active':''}" onclick="goApprovalPage(${p})">${p}</button>`;html+=`<button class="page-btn" ${approvalState.page>=pages?'disabled':''} onclick="goApprovalPage(${approvalState.page+1})">›</button>`;pagesBox.innerHTML=html;
+    }
+
+    function findRequest(key){return approvalState.rows.find(r=>r.key===key)||null}
+    function openApprovalDetails(key){const rec=findRequest(key);if(!rec)return;const modal=document.getElementById('approval-modal');document.getElementById('approval-modal-title').textContent=rec.title;document.getElementById('approval-modal-subtitle').textContent=`${rec.type} · Soumis par ${rec.actor} · ${fmt(rec.date)}`;document.getElementById('approval-modal-body').innerHTML=buildDetails(rec);modal.dataset.key=key;modal.classList.add('open');setTimeout(()=>document.querySelector('#approval-modal input, #approval-modal textarea, #approval-modal select')?.focus(),50)}
+    function closeApprovalDetails(){const modal=document.getElementById('approval-modal');modal.classList.remove('open');modal.dataset.key=''}
+    document.getElementById('approval-modal').addEventListener('click',e=>{if(e.target.id==='approval-modal')closeApprovalDetails()});
+
+    function buildDetails(rec){const x=rec.raw||{};let body='';
+      if(rec.kind==='petri-delete'){body=`<div class="approval-detail-grid"><div class="detail-box"><span>Boîte</span><strong>${esc(x.petri_code||x.petri_id||'—')}</strong></div><div class="detail-box"><span>Phase</span><strong>P${esc(x.phase||'—')}</strong></div><div class="detail-box"><span>Demandeur</span><strong>${esc(rec.actor)}</strong></div></div><div class="reason-box"><strong>Motif obligatoire</strong><br>${esc(x.reason||'—')}</div>${x.evidence_url?`<div class="evidence-box"><a href="${esc(x.evidence_url)}" target="_blank" rel="noopener"><img src="${esc(x.evidence_url)}" alt="Justificatif"></a></div>`:'<div class="evidence-box">Aucune photo justificative.</div>'}`}
+      else if(rec.kind==='lc-delete'){const isLot=String(x.resource_type)==='lot';body=`<div class="approval-detail-grid"><div class="detail-box"><span>Élément</span><strong>${esc(isLot?(x.lot_code||x.lc_lot_id):(x.pot_code||x.lc_pot_id)||'—')}</strong></div><div class="detail-box"><span>Type</span><strong>${isLot?'Lot LC':'Pot LC'}</strong></div><div class="detail-box"><span>Demandeur</span><strong>${esc(rec.actor)}</strong></div></div><div class="reason-box"><strong>Motif obligatoire</strong><br>${esc(x.reason||'—')}</div>${x.evidence_url?`<div class="evidence-box"><a href="${esc(x.evidence_url)}" target="_blank" rel="noopener"><img src="${esc(x.evidence_url)}" alt="Justificatif LC"></a></div>`:'<div class="evidence-box">Aucune photo justificative.</div>'}`}
+      else if(rec.kind==='photo-delete'){body=`<div class="approval-detail-grid"><div class="detail-box"><span>Photo</span><strong>#${esc(x.photo_record_id||'—')}</strong></div><div class="detail-box"><span>Module</span><strong>${esc(x.photo_type||'—')}</strong></div><div class="detail-box"><span>Demandeur</span><strong>${esc(rec.actor)}</strong></div></div>${x.photo_url?`<div class="evidence-box"><a href="${esc(x.photo_url)}" target="_blank" rel="noopener"><img src="${esc(x.photo_url)}" alt="Photo à supprimer"></a></div>`:''}`}
+      else if(rec.kind==='strain-create'){const p=x.payload||{};const qty=(p.quantity===null||p.quantity===undefined||p.quantity==='')?'—':`${p.quantity} ${p.unit||''}`;body=`<div class="approval-detail-grid"><div class="detail-box"><span>Code</span><strong>${esc(p.code||x.requested_code||'—')}</strong></div><div class="detail-box"><span>Nom</span><strong>${esc(p.name||'—')}</strong></div><div class="detail-box"><span>Espèce</span><strong>${esc(p.species||'—')}</strong></div><div class="detail-box"><span>Fournisseur</span><strong>${esc(p.source_name||'—')}</strong></div><div class="detail-box"><span>Quantité</span><strong>${esc(qty)}</strong></div><div class="detail-box"><span>Référence certificat</span><strong>${esc(p.source_ref||'—')}</strong></div></div>${p.notes?`<div class="reason-box"><strong>Notes</strong><br>${esc(p.notes)}</div>`:''}`}
+      else if(rec.kind==='strain-cert'){const p=x.payload||{};body=`<div class="cert-grid"><label>Référence certificat *<input id="modal-cert-ref" value="${esc(p.certificate_ref||'')}" required></label><label>Certifié / contrôlé par<input id="modal-cert-by" value="${esc(p.certified_by||'')}"></label><label>Statut contamination<input id="modal-cert-cont-status" value="${esc(p.contamination_status||'')}"></label><label>Type contamination<input id="modal-cert-cont-type" value="${esc(p.contamination_type||'')}"></label><label>Taux / vitesse de croissance<input type="number" step="0.01" id="modal-cert-growth" value="${esc(p.growth_rate??'')}"></label><label>Jours de colonisation<input type="number" min="0" id="modal-cert-days" value="${esc(p.colonization_days??'')}"></label><label>Morphologie<input id="modal-cert-morph" value="${esc(p.morphology_status||'')}"></label><label class="full">Notes<textarea id="modal-cert-notes">${esc(p.notes||'')}</textarea></label><label class="full">Remplacer / ajouter un PDF facultatif<input type="file" accept="application/pdf,.pdf" id="modal-cert-file"></label><label class="full">Note de revue administrateur<textarea id="modal-cert-review-note" placeholder="Optionnel"></textarea></label></div>${x.certificate_file_url?`<div class="evidence-box"><strong>PDF existant :</strong> <a href="${esc(x.certificate_file_url)}" target="_blank" rel="noopener">${esc(x.certificate_file_name||'Ouvrir le PDF')}</a><br><label style="margin-top:10px;display:inline-flex;gap:7px;align-items:center"><input type="checkbox" id="modal-cert-remove-file"> Retirer ce fichier avant approbation</label></div>`:'<div class="evidence-box">Aucun PDF joint. Le fichier est facultatif.</div>'}`}
+      const approveLabel=rec.kind==='strain-cert'?'Approuver et certifier':'Approuver';return body+`<div class="modal-actions"><button class="modal-action cancel" type="button" onclick="closeApprovalDetails()">Fermer</button><button class="modal-action reject" type="button" onclick="rejectRequest('${esc(rec.key)}')">Refuser</button><button class="modal-action approve" type="button" onclick="approveRequest('${esc(rec.key)}')">${approveLabel}</button></div>`}
+
+    async function approveRequest(key){const rec=findRequest(key);if(!rec)return;if(rec.kind==='strain-cert'){if(!document.getElementById('approval-modal').classList.contains('open')){openApprovalDetails(key);return}return approveCertification(rec)}
+      if(rec.kind==='strain-create'){if(!confirm('Approuver cette demande et créer réellement la souche externe ?'))return;try{const result=await api(`/api/strain-creation-requests/${rec.raw.id}/approve`,{method:'POST',body:'{}'});if(result.strain)alert(`✅ Souche ${result.strain.code||''} créée dans l’inventaire.`);closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='petri-delete'){if(!confirm('Approuver la demande et retirer cette boîte de Pétri ? Le motif sera conservé dans l’historique.'))return;const note=prompt('Note administrateur (optionnelle) :','');if(note===null)return;try{await api(`/api/admin/petri-deletion-requests/${rec.raw.id}/approve`,{method:'POST',body:JSON.stringify({note})});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='lc-delete'){if(!confirm('Approuver cette demande et supprimer réellement cet élément LC ? Le motif sera conservé dans l’historique.'))return;const note=prompt('Note administrateur (optionnelle) :','');if(note===null)return;try{await api(`/api/admin/lc-deletion-requests/${rec.raw.id}/approve`,{method:'POST',body:JSON.stringify({note})});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='photo-delete'){if(!confirm('Approuver et supprimer définitivement cette photo ?'))return;try{await api(`/api/admin/photo-deletion-requests/${rec.raw.id}/approve`,{method:'POST',body:'{}'});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}}
+    }
+
+    async function rejectRequest(key){const rec=findRequest(key);if(!rec)return;if(rec.kind==='strain-cert'){if(!confirm('Refuser cette certification ? La demande sera supprimée du registre et le PDF temporaire sera supprimé s’il existe.'))return;try{const result=await api(`/api/strain-certification-requests/${rec.raw.id}/reject`,{method:'POST',body:'{}'});if(result.storage_warning)alert('Demande refusée, mais le fichier temporaire n’a pas pu être supprimé : '+result.storage_warning);closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='strain-create'){if(!confirm('Refuser cette demande de création ?'))return;try{await api(`/api/strain-creation-requests/${rec.raw.id}/reject`,{method:'POST',body:'{}'});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='petri-delete'){if(!confirm('Refuser cette demande de suppression ?'))return;const note=prompt('Motif du refus / note administrateur (optionnelle) :','');if(note===null)return;try{await api(`/api/admin/petri-deletion-requests/${rec.raw.id}/reject`,{method:'POST',body:JSON.stringify({note})});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='lc-delete'){if(!confirm('Refuser cette demande de suppression LC ?'))return;const note=prompt('Motif du refus / note administrateur (optionnelle) :','');if(note===null)return;try{await api(`/api/admin/lc-deletion-requests/${rec.raw.id}/reject`,{method:'POST',body:JSON.stringify({note})});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}return}
+      if(rec.kind==='photo-delete'){if(!confirm('Refuser cette demande ?'))return;try{await api(`/api/admin/photo-deletion-requests/${rec.raw.id}/reject`,{method:'POST',body:'{}'});closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}}
+    }
+
+    async function approveCertification(rec){const ref=document.getElementById('modal-cert-ref')?.value.trim();if(!ref)return alert('La référence du certificat est obligatoire.');if(!confirm('Approuver cette certification ? La souche sera marquée CERTIFIÉE et autorisée pour la production.'))return;const fd=new FormData();fd.append('certificate_ref',ref);fd.append('certified_by',document.getElementById('modal-cert-by')?.value.trim()||'');fd.append('contamination_status',document.getElementById('modal-cert-cont-status')?.value.trim()||'');fd.append('contamination_type',document.getElementById('modal-cert-cont-type')?.value.trim()||'');fd.append('growth_rate',document.getElementById('modal-cert-growth')?.value||'');fd.append('colonization_days',document.getElementById('modal-cert-days')?.value||'');fd.append('morphology_status',document.getElementById('modal-cert-morph')?.value.trim()||'');fd.append('notes',document.getElementById('modal-cert-notes')?.value.trim()||'');fd.append('review_note',document.getElementById('modal-cert-review-note')?.value.trim()||'');fd.append('decision','PASS');if(document.getElementById('modal-cert-remove-file')?.checked)fd.append('remove_certificate_file','true');const file=document.getElementById('modal-cert-file')?.files?.[0];if(file)fd.append('certificate_pdf',file);try{const r=await fetch(`/api/strain-certification-requests/${rec.raw.id}/approve`,{method:'POST',credentials:'same-origin',body:fd});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'Approbation impossible');alert(`✅ Souche ${data.strain?.code||''} certifiée et autorisée pour la production.`);closeApprovalDetails();await loadApprovals()}catch(e){alert('❌ '+e.message)}}
+
+    document.addEventListener('DOMContentLoaded',()=>{const auth=typeof requireAdminAuth==='function'?requireAdminAuth():null;if(!auth)return;if(auth.role&&auth.role!=='admin'){window.location.href='admin.html';return}loadApprovals().catch(e=>alert('❌ '+e.message));setInterval(()=>loadApprovals().catch(()=>{}),10*60*1000)});
+  </script>
+</body>
+</html>
