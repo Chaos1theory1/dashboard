@@ -76,6 +76,72 @@
     .grain-status-filter{display:none;position:absolute;z-index:80;top:calc(100% + 8px);right:0;min-width:205px;width:auto!important;margin:0!important;padding:8px 10px!important;border:1px solid #cfd8d2!important;border-radius:9px!important;background:#fff!important;box-shadow:0 10px 28px rgba(0,0,0,.16)!important;font-size:12px!important;text-transform:none!important;letter-spacing:0!important}
     .grain-status-filter-wrap.open .grain-status-filter{display:block}
     @media(max-width:767.98px){.grain-status-filter{right:auto;left:0;min-width:180px}.grain-pagination .btn-main{width:auto!important;margin-bottom:0!important}}
+
+
+    /* === FIX SEARCH BAR / DASHBOARD SHELL ===
+       The page-level generic label/input rules must not reshape the global shell search. */
+    body.mtd-dashboard-shell .mtd-shell-topbar .mtd-shell-search-wrap{
+      position:relative!important;
+      width:min(430px,45vw)!important;
+      margin:0!important;
+      padding:0!important;
+    }
+    body.mtd-dashboard-shell .mtd-shell-topbar label.mtd-shell-search{
+      position:relative!important;
+      display:flex!important;
+      align-items:center!important;
+      gap:9px!important;
+      width:100%!important;
+      height:42px!important;
+      margin:0!important;
+      padding:0 13px!important;
+      transform:none!important;
+      border:1px solid #d9e4dc!important;
+      border-radius:12px!important;
+      background:#fbfdfb!important;
+      color:#7f8d83!important;
+      font-weight:400!important;
+      line-height:1!important;
+      box-sizing:border-box!important;
+    }
+    body.mtd-dashboard-shell .mtd-shell-topbar label.mtd-shell-search:focus-within{
+      border-color:#8bc99d!important;
+      box-shadow:0 0 0 3px rgba(47,159,87,.10)!important;
+    }
+    body.mtd-dashboard-shell .mtd-shell-topbar label.mtd-shell-search svg{
+      width:17px!important;
+      height:17px!important;
+      min-width:17px!important;
+      flex:0 0 17px!important;
+      margin:0!important;
+    }
+    body.mtd-dashboard-shell .mtd-shell-topbar label.mtd-shell-search input#mtd-global-search{
+      display:block!important;
+      width:100%!important;
+      min-width:0!important;
+      height:40px!important;
+      margin:0!important;
+      padding:0!important;
+      border:0!important;
+      border-radius:0!important;
+      outline:0!important;
+      background:transparent!important;
+      box-shadow:none!important;
+      color:var(--mtd-text,#1f2d24)!important;
+      font:12px 'DM Sans',Arial,sans-serif!important;
+      line-height:40px!important;
+    }
+    body.mtd-dashboard-shell .mtd-shell-topbar label.mtd-shell-search input#mtd-global-search::placeholder{
+      color:#8b978f!important;
+      opacity:1!important;
+    }
+    @media(max-width:900px){
+      body.mtd-dashboard-shell .mtd-shell-topbar .mtd-shell-search-wrap{
+        width:auto!important;
+        flex:1 1 auto!important;
+      }
+    }
+
   </style>
 </head>
 <body>
