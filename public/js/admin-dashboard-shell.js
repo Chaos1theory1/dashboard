@@ -15,7 +15,7 @@
     'admin-souches.html':{icon:'sprout',title:'Souches',subtitle:'Bibliothèque biologique, certification, provenance, échéances et disponibilité.'},
     'admin-souche-journal.html':{icon:'dna',title:'Journal de souche',subtitle:'Historique et traçabilité détaillée de la souche sélectionnée.'},
     'admin-taches.html':{icon:'clipboard-check',title:'Tâches obligatoires',subtitle:'Contrôles réellement dus aujourd’hui, retards et échéances calculés depuis la base.'},
-    'admin-users.html':{icon:'users',title:'Utilisateurs et approbations',subtitle:'Accès, rôles, activité de production et demandes de suppression.'},
+    'admin-users.html':{icon:'users',title:'Gestion des utilisateurs',subtitle:'Comptes, rôles, activité de production et approbations sensibles.'},
     'change-password.html':{icon:'key-round',title:'Sécurité du compte',subtitle:'Mise à jour du mot de passe utilisateur.'}
   };
 
@@ -26,14 +26,20 @@
     'admin-souche-journal.html':'admin-souches.html'
   }[page]||page;
 
-  const nav=[
-    ['admin.html','layout-dashboard','Tableau de bord'],
-    ['admin-isolement.html','flask-conical','Isolement tissulaire'],
-    ['admin-myc-liquide.html','beaker','Mycélium liquide (LC)'],
-    ['admin-myc-grain.html','wheat','Mycélium sur grain'],
-    ['admin-souches.html','sprout','Souches'],
-    ['admin-taches.html','clipboard-check','Tâches obligatoires'],
-    ['admin-users.html','users','Utilisateurs','admin']
+  const navSections=[
+    {label:'',items:[['admin.html','layout-dashboard','Tableau de bord']]},
+    {label:'GESTION',items:[
+      ['admin-isolement.html','flask-conical','Isolement tissulaire'],
+      ['admin-myc-liquide.html','beaker','Mycélium liquide (LC)'],
+      ['admin-myc-grain.html','wheat','Mycélium sur grain'],
+      ['admin-souches.html','sprout','Souches'],
+      ['admin-taches.html','clipboard-check','Tâches obligatoires']
+    ]},
+    {label:'ADMINISTRATION',admin:true,items:[
+      ['admin-users.html','users','Utilisateurs','admin'],
+      ['admin-users.html?view=approvals','shield-check','Demandes d’approbation','admin'],
+      ['admin-users.html?view=activity','activity','Activité production','admin']
+    ]}
   ];
 
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -59,7 +65,7 @@
         <span><strong>MYCELIUM</strong><small>TECH DIGITAL</small></span>
       </a>
       <nav class="mtd-shell-nav">
-        ${nav.map(([href,icon,label,role])=>`<a href="${href}"${activeNavPage===href?' class="active"':''}${role?' data-mtd-admin-link hidden':''}>${iconMarkup(icon)}<span>${label}</span></a>`).join('')}
+        ${navSections.map(section=>`<div class="mtd-shell-nav-section"${section.admin?' data-mtd-admin-section hidden':''}>${section.label?`<div class="mtd-shell-nav-label">${section.label}</div>`:''}${section.items.map(([href,icon,label,role])=>{const base=href.split('?')[0];const params=new URLSearchParams(href.split('?')[1]||'');const view=params.get('view')||'';const currentView=new URLSearchParams(location.search||'').get('view')||'';const active=activeNavPage===base&&((base!=='admin-users.html')||(view?currentView===view:!currentView));return `<a href="${href}"${active?' class="active"':''}${role?' data-mtd-admin-link hidden':''}>${iconMarkup(icon)}<span>${label}</span>${view==='approvals'?'<span class="mtd-nav-count" id="mtd-nav-approval-count" hidden>0</span>':''}</a>`}).join('')}</div>`).join('')}
       </nav>
       <section class="mtd-shell-system" id="mtd-shell-system">
         <div class="mtd-shell-system-head"><span>État du système</span><small id="mtd-system-time">—</small></div>
@@ -83,7 +89,7 @@
 
     const notifications=document.createElement('section');
     notifications.className='mtd-shell-notifications';notifications.id='mtd-shell-notifications';
-    notifications.innerHTML='<h3>Demandes de suppression</h3><div id="mtd-shell-request-list"><div class="mtd-shell-empty">Chargement…</div></div><a href="admin-users.html" class="mtd-shell-review">Gérer les demandes</a>';
+    notifications.innerHTML='<h3>Demandes d’approbation</h3><div id="mtd-shell-request-list"><div class="mtd-shell-empty">Chargement…</div></div><a href="admin-users.html?view=approvals" class="mtd-shell-review">Gérer toutes les demandes</a>';
 
     document.body.prepend(overlay,sidebar,top,notifications);
     window.lucide?.createIcons();
@@ -181,10 +187,19 @@
   async function loadRequests(){
     const list=document.getElementById('mtd-shell-request-list');
     try{
-      const response=await fetch('/api/admin/photo-deletion-requests',{credentials:'same-origin'});if(!response.ok)throw new Error();
-      const pending=(await response.json()).filter(row=>row.status==='pending');
-      const badge=document.getElementById('mtd-shell-badge');badge.hidden=!pending.length;badge.textContent=pending.length>99?'99+':pending.length;
-      list.innerHTML=pending.length?pending.slice(0,8).map(row=>`<div class="mtd-shell-request"><span class="mtd-shell-request-icon">${iconMarkup('trash-2')}</span><span><strong>${esc((row.photo_type||'photo').toUpperCase())} — photo #${esc(row.photo_record_id)}</strong><small>Demandée par ${esc(row.requested_by_name||'Utilisateur')} · ${esc(date(row.requested_at))}</small></span></div>`).join(''):'<div class="mtd-shell-empty">Aucune demande en attente.</div>';
+      const endpoints=[
+        ['/api/admin/photo-deletion-requests','Suppression photo','trash-2'],
+        ['/api/admin/petri-deletion-requests','Suppression Petri','flask-conical'],
+        ['/api/admin/lc-deletion-requests','Suppression LC','beaker'],
+        ['/api/strain-creation-requests','Création souche','sprout'],
+        ['/api/strain-certification-requests','Certification souche','badge-check']
+      ];
+      const settled=await Promise.allSettled(endpoints.map(([url])=>fetch(url,{credentials:'same-origin',cache:'no-store'}).then(async r=>{if(!r.ok)throw new Error();return r.json()})));
+      const items=[];let total=0;
+      settled.forEach((result,index)=>{if(result.status!=='fulfilled')return;const [url,label,icon]=endpoints[index];const rows=Array.isArray(result.value)?result.value:[];const pending=url.includes('strain-certification')?rows:rows.filter(row=>String(row.status||'pending').toLowerCase()==='pending');total+=pending.length;pending.slice(0,3).forEach(row=>items.push({label,icon,row,url}))});
+      const badge=document.getElementById('mtd-shell-badge');if(badge){badge.hidden=!total;badge.textContent=total>99?'99+':total}
+      const navBadge=document.getElementById('mtd-nav-approval-count');if(navBadge){navBadge.hidden=!total;navBadge.textContent=total>99?'99+':total}
+      list.innerHTML=items.length?items.slice(0,8).map(item=>{const row=item.row;const who=row.requested_by_name||row.actor_name||'Utilisateur';const when=row.requested_at||row.created_at;let subject='Demande en attente';if(item.url.includes('photo-deletion'))subject=`Photo #${esc(row.photo_record_id||'')}`;else if(item.url.includes('petri-deletion'))subject=esc(row.petri_code||('Petri #'+(row.petri_id||'')));else if(item.url.includes('lc-deletion'))subject=esc(row.pot_code||row.lot_code||'Élément LC');else if(item.url.includes('strain-creation'))subject=esc(row.requested_code||row.payload?.code||'Souche externe');else if(item.url.includes('strain-certification'))subject=esc(row.strain_code||'Certification souche');return `<div class="mtd-shell-request"><span class="mtd-shell-request-icon">${iconMarkup(item.icon)}</span><span><strong>${esc(item.label)} — ${subject}</strong><small>${esc(who)} · ${esc(date(when))}</small></span></div>`}).join(''):'<div class="mtd-shell-empty">Aucune demande en attente.</div>';
       window.lucide?.createIcons();
     }catch(_){list.innerHTML='<div class="mtd-shell-empty">Impossible de charger les demandes.</div>'}
   }
@@ -194,7 +209,7 @@
     const user=auth||window.mtdSession||{},isAdmin=user.role==='admin';
     const name=document.getElementById('mtd-shell-name'),role=document.getElementById('mtd-shell-role');
     if(name)name.textContent=user.username||'Utilisateur';if(role)role.textContent=isAdmin?'Administrateur':user.role==='operator'?'Opérateur':user.role==='visitor'?'Visiteur':'Lecture seule';
-    document.querySelectorAll('[data-mtd-admin-link]').forEach(el=>{el.hidden=!isAdmin;el.style.display=isAdmin?'':'none'});
+    document.querySelectorAll('[data-mtd-admin-link]').forEach(el=>{el.hidden=!isAdmin;el.style.display=isAdmin?'':'none'});document.querySelectorAll('[data-mtd-admin-section]').forEach(el=>{el.hidden=!isAdmin;el.style.display=isAdmin?'':'none'});
     const bell=document.getElementById('mtd-shell-bell');if(bell){bell.hidden=!isAdmin;bell.style.display=isAdmin?'':'none';if(isAdmin)loadRequests();else document.getElementById('mtd-shell-notifications')?.classList.remove('open')}
   }
 
