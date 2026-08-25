@@ -794,7 +794,7 @@ app.get('/api/admin/roles', requirePermission('users.manage'), async (_req, res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/admin/users', requirePermission('users.manage'), async (_req, res) => {
+app.get('/api/admin/users', requirePermission('users.manage'), async (req, res) => {
   try {
     await ensureUserManagementSchema();
     const result = await realPool.query(`
@@ -804,7 +804,48 @@ app.get('/api/admin/users', requirePermission('users.manage'), async (_req, res)
       FROM app_users u JOIN app_roles r ON r.id=u.role_id
       ORDER BY online DESC,lower(u.username)
     `);
-    res.json(result.rows);
+
+    const users = result.rows.map(row => ({
+      ...row,
+      recovery_account: false,
+      managed: true
+    }));
+
+    // BaslyAli peut exister uniquement via ADMIN_USERNAME / ADMIN_PASSWORD dans Vercel.
+    // Dans ce cas il n'a volontairement aucune ligne app_users/Supabase Auth.
+    // On l'ajoute comme ligne virtuelle afin qu'il apparaisse dans l'interface sans
+    // créer de faux UUID ni rendre disponibles les actions modifier/geler/supprimer.
+    const recoveryUsername = String(ADMIN_USERNAME || '').trim();
+    const recoveryAlreadyManaged = users.some(
+      user => String(user.username || '').trim().toLowerCase() === recoveryUsername.toLowerCase()
+    );
+
+    if (recoveryUsername && !recoveryAlreadyManaged) {
+      const session = req.adminSession || {};
+      const recoveryOnline =
+        session.role === 'admin' &&
+        !session.userId &&
+        String(session.username || '').trim() === recoveryUsername;
+
+      users.unshift({
+        id: 'recovery-admin',
+        email: null,
+        username: recoveryUsername,
+        display_name: recoveryUsername,
+        phone_number: null,
+        active: true,
+        must_change_password: false,
+        last_seen_at: recoveryOnline ? new Date().toISOString() : null,
+        created_at: null,
+        role: 'admin',
+        role_name: 'Administrateur',
+        online: recoveryOnline,
+        recovery_account: true,
+        managed: false
+      });
+    }
+
+    res.json(users);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
