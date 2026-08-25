@@ -142,6 +142,18 @@
       }
     }
 
+  
+
+    /* Suppression pot/sac grain : motif obligatoire + photo justificative facultative */
+    .grain-delete-modal{position:fixed;inset:0;z-index:12050;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(8,25,15,.66);backdrop-filter:blur(4px)}
+    .grain-delete-modal.open{display:flex}.grain-delete-card{width:min(680px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 28px 80px rgba(0,0,0,.33);border-top:7px solid var(--red)}
+    .grain-delete-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:19px 20px 15px;border-bottom:1px solid #e7ece8}.grain-delete-head h4{margin:0;color:#26352b;font-size:20px}.grain-delete-head p{margin:5px 0 0;color:#758179;font-size:12px;line-height:1.5}
+    .grain-delete-close{width:36px;height:36px;flex:none;border:0;border-radius:10px;background:#eef3ef;color:#506057;font-size:20px;cursor:pointer}.grain-delete-body{padding:20px}.grain-delete-alert{padding:13px 14px;margin-bottom:16px;border-radius:11px;background:#fff1ef;border:1px solid #ffd5d0;border-left:5px solid var(--red);color:#812c24;font-size:12px;line-height:1.55;font-weight:700}
+    .grain-delete-target{padding:10px 12px;margin-bottom:14px;border-radius:10px;background:#f5f8f6;border:1px solid #e0e7e2;font-size:12px}.grain-delete-target strong{color:#1f7a41}.grain-delete-textarea{width:100%!important;min-height:120px!important;margin:0!important;box-sizing:border-box;border:1px solid #cfdad2!important;border-radius:11px!important;padding:12px!important;background:#fff!important;font-size:13px!important}
+    .grain-delete-evidence{margin-top:16px;padding:14px;border:1px solid #dfe7e1;border-radius:12px;background:#f8faf9}.grain-delete-evidence h5{margin:0 0 10px;font-size:13px}.grain-delete-photo-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grain-delete-photo-btn{margin:0!important;border:1px solid #d3ddd6;border-radius:10px;background:#fff;padding:10px 12px!important;text-align:center;font-size:11px;font-weight:900;cursor:pointer}.grain-delete-photo-btn:hover{border-color:var(--green)}
+    .grain-delete-preview{display:none;margin-top:12px;padding:10px;border-radius:10px;background:#fff;border:1px solid #dce5df}.grain-delete-preview.show{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.grain-delete-preview img{width:130px;height:95px;object-fit:cover;border-radius:8px}.grain-delete-error{min-height:18px;margin-top:12px;color:#c0392b;font-size:12px;font-weight:800}.grain-delete-foot{display:flex;justify-content:flex-end;gap:10px;padding:0 20px 20px}.grain-delete-foot .btn-main{min-width:135px}
+    @media(max-width:600px){.grain-delete-photo-actions{grid-template-columns:1fr}.grain-delete-foot{flex-direction:column-reverse}.grain-delete-foot .btn-main{width:100%}}
+
   </style>
 </head>
 <body>
@@ -298,12 +310,45 @@
       </div>
     </div>
   </section>
+
+
+  <div id="grain-delete-modal" class="grain-delete-modal" role="dialog" aria-modal="true" aria-labelledby="grain-delete-title">
+    <div class="grain-delete-card">
+      <div class="grain-delete-head">
+        <div><h4 id="grain-delete-title">Suppression pot / sac grain</h4><p id="grain-delete-role-message">Le motif est obligatoire. Une photo justificative est facultative.</p></div>
+        <button type="button" class="grain-delete-close" onclick="closeGrainDeleteModal()" aria-label="Fermer">×</button>
+      </div>
+      <div class="grain-delete-body">
+        <div class="grain-delete-alert" id="grain-delete-alert">⚠️ Cette action concerne un élément de production et son journal. Le motif sera conservé dans l’historique de suppression.</div>
+        <div class="grain-delete-target"><strong>Pot / sac :</strong> <span id="grain-delete-target-label">—</span></div>
+        <label class="admin-label" for="grain-delete-reason">Pourquoi souhaitez-vous supprimer ce pot / sac ? *</label>
+        <textarea id="grain-delete-reason" class="grain-delete-textarea" maxlength="1500" placeholder="Décrivez clairement le problème observé ou la raison de la suppression…" required></textarea>
+        <div class="grain-delete-evidence">
+          <h5>Photo justificative <span style="font-weight:500;color:#78847c">(facultative)</span></h5>
+          <div class="grain-delete-photo-actions">
+            <label class="grain-delete-photo-btn" for="grain-delete-upload">📁 Choisir une photo</label>
+            <label class="grain-delete-photo-btn" for="grain-delete-camera">📷 Prendre une photo</label>
+          </div>
+          <input id="grain-delete-upload" type="file" accept="image/*" style="display:none">
+          <input id="grain-delete-camera" type="file" accept="image/*" capture="environment" style="display:none">
+          <div id="grain-delete-preview" class="grain-delete-preview"><img id="grain-delete-preview-img" alt="Aperçu justificatif"><div><strong id="grain-delete-preview-name"></strong><br><button type="button" class="btn-main btn-grey" style="margin-top:7px;padding:6px 9px" onclick="clearGrainDeleteEvidence()">Retirer la photo</button></div></div>
+        </div>
+        <div id="grain-delete-error" class="grain-delete-error"></div>
+      </div>
+      <div class="grain-delete-foot">
+        <button type="button" class="btn-main btn-light" onclick="closeGrainDeleteModal()">← Annuler</button>
+        <button type="button" class="btn-main btn-red" id="grain-delete-submit" onclick="submitGrainDeletion()">Continuer</button>
+      </div>
+    </div>
+  </div>
+
 <script src="js/admin-auth.js"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       if (typeof requireAdminAuth === "function") {
         const auth = requireAdminAuth();
         if (!auth) return;
+        window.currentAdminRole = String(auth.role || '').toLowerCase();
         const nameEl = document.getElementById("adminUserName");
         if (nameEl) nameEl.textContent = auth.username || "Admin";
       }
@@ -747,7 +792,7 @@
           const jour=u.last_day_index!=null?'J'+esc(u.last_day_index):'J0';
           const groupStart=idx===0?' grain-group-start':'';
           const sourceCell=idx===0?`<td rowspan="${rowSpan}" class="grain-source-cell">${sourceMyceliumHtml(first)}</td>`:'';
-          html+=`<tr class="grain-unit-row-line${groupStart}"><td class="grain-unit-indent"><span class="grain-unit-code">↳ ${esc(u.code)}</span><div class="grain-small">${esc(u.container_type||'—')} n°${esc(u.unit_number||'—')}</div></td><td>${esc(fmtDateTime(semisGroupDate(u)))}</td>${sourceCell}<td>${esc(u.type_grain||'Blé')}</td><td>${typeCapacityHtml(u)}</td><td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td><td>${u.last_propagation_pct!=null?esc(u.last_propagation_pct)+' %':'—'}<br><span class="grain-small">${u.last_score20!=null?'score '+esc(u.last_score20)+'/20':''}</span></td><td>${statusBadge(u.statut)}</td><td><div class="grain-row-actions"><button class="btn-main btn-orange" type="button" onclick="openJournalForUnit(${Number(u.id)})">Journal</button>${stockBtn}<button class="btn-main btn-blue" type="button" onclick="printGrainUnitLabelsById(${Number(u.id)})">🏷️ Étiquette</button><button class="btn-main btn-red" type="button" onclick="deleteGrainUnit(${Number(u.id)})">🗑️ Supprimer</button></div></td></tr>`;
+          html+=`<tr class="grain-unit-row-line${groupStart}"><td class="grain-unit-indent"><span class="grain-unit-code">↳ ${esc(u.code)}</span><div class="grain-small">${esc(u.container_type||'—')} n°${esc(u.unit_number||'—')}</div></td><td>${esc(fmtDateTime(semisGroupDate(u)))}</td>${sourceCell}<td>${esc(u.type_grain||'Blé')}</td><td>${typeCapacityHtml(u)}</td><td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td><td>${u.last_propagation_pct!=null?esc(u.last_propagation_pct)+' %':'—'}<br><span class="grain-small">${u.last_score20!=null?'score '+esc(u.last_score20)+'/20':''}</span></td><td>${statusBadge(u.statut)}</td><td><div class="grain-row-actions"><button class="btn-main btn-orange" type="button" onclick="openJournalForUnit(${Number(u.id)})">Journal</button>${stockBtn}<button class="btn-main btn-blue" type="button" onclick="printGrainUnitLabelsById(${Number(u.id)})">🏷️ Étiquette</button>${['admin','operator'].includes(String(window.currentAdminRole||'').toLowerCase())?`<button class="btn-main btn-red" type="button" onclick="deleteGrainUnit(${Number(u.id)})">🗑️ Supprimer</button>`:''}</div></td></tr>`;
         });
       });
       body.innerHTML=html;
@@ -777,23 +822,60 @@ Unités générées : ${r.units?.length||payload.nb_units}`);await loadAll();sho
 
     window.openJournalForUnit=function(id){if(!id)return alert('Pot/sac introuvable.');window.location.href='admin-myc-grain-journal.html?grain_unit_id='+encodeURIComponent(id)+'&mode=journal';}
 
-    window.deleteGrainUnit=async function(id){
-      const u=units.find(x=>Number(x.id)===Number(id));
-      if(!u)return alert('Pot/sac introuvable.');
-      if(!confirm('Supprimer ce pot/sac ?\n\n'+(u.code||'')+'\n\nCette action supprimera aussi son journal s’il existe.'))return;
-      try{
-        const r=await fetch('/api/grain-units/'+encodeURIComponent(id),{method:'DELETE'});
-        const txt=await r.text(); let data=null; try{data=txt?JSON.parse(txt):null}catch(_){data={error:txt}}
-        if(!r.ok)throw new Error((data&&data.error)||txt||r.statusText);
-        alert('✅ Pot/sac supprimé : '+(data.deleted_code||u.code||id));
-        await loadAll();
-      }catch(e){alert('❌ '+apiErrorMessage(e));}
+    let grainDeleteTarget=null;
+    let grainDeleteEvidenceFile=null;
+
+    function currentGrainRole(){return String(window.currentAdminRole||'').toLowerCase()}
+    function updateGrainDeleteRoleCopy(){
+      const role=currentGrainRole();
+      const msg=$('grain-delete-role-message'),submit=$('grain-delete-submit'),alertBox=$('grain-delete-alert');
+      if(role==='operator'){
+        if(msg)msg.textContent='Opérateur : la demande sera envoyée à un administrateur. Le pot / sac restera présent tant que la demande n’est pas approuvée.';
+        if(submit)submit.textContent='Envoyer la demande';
+        if(alertBox)alertBox.innerHTML='⚠️ <strong>Aucune suppression immédiate.</strong> Le motif est obligatoire et sera présenté à l’administrateur avec la photo justificative si vous en ajoutez une.';
+      }else{
+        if(msg)msg.textContent='Administrateur : après validation du formulaire, la suppression sera exécutée immédiatement.';
+        if(submit)submit.textContent='Supprimer définitivement';
+        if(alertBox)alertBox.innerHTML='⚠️ <strong>Suppression définitive.</strong> Cette action retire le pot / sac de la base et met à jour le lot de préparation. Le motif sera conservé dans l’historique.';
+      }
     }
+    function setGrainDeleteEvidence(file){
+      grainDeleteEvidenceFile=file||null;
+      const preview=$('grain-delete-preview'),img=$('grain-delete-preview-img'),name=$('grain-delete-preview-name');
+      if(!file){if(preview)preview.classList.remove('show');if(img)img.removeAttribute('src');if(name)name.textContent='';return}
+      if(name)name.textContent=file.name||'Photo justificative';
+      const url=URL.createObjectURL(file);if(img){img.src=url;img.onload=()=>URL.revokeObjectURL(url)}if(preview)preview.classList.add('show');
+    }
+    window.clearGrainDeleteEvidence=function(){grainDeleteEvidenceFile=null;const up=$('grain-delete-upload'),cam=$('grain-delete-camera');if(up)up.value='';if(cam)cam.value='';setGrainDeleteEvidence(null)};
+    window.closeGrainDeleteModal=function(){const modal=$('grain-delete-modal');if(modal)modal.classList.remove('open');grainDeleteTarget=null;window.clearGrainDeleteEvidence();if($('grain-delete-reason'))$('grain-delete-reason').value='';if($('grain-delete-error'))$('grain-delete-error').textContent=''};
+    window.deleteGrainUnit=function(id){
+      const role=currentGrainRole();
+      if(!['admin','operator'].includes(role))return alert('Cette action est réservée aux administrateurs et opérateurs.');
+      const u=units.find(x=>Number(x.id)===Number(id));if(!u)return alert('Pot/sac introuvable.');
+      grainDeleteTarget=u;window.clearGrainDeleteEvidence();$('grain-delete-target-label').textContent=(u.code||('Unité #'+id))+' · '+(u.container_type||'pot/sac');$('grain-delete-reason').value='';$('grain-delete-error').textContent='';updateGrainDeleteRoleCopy();$('grain-delete-modal').classList.add('open');setTimeout(()=>$('grain-delete-reason')?.focus(),80);
+    };
+    window.submitGrainDeletion=async function(){
+      if(!grainDeleteTarget)return;
+      const reason=String($('grain-delete-reason')?.value||'').trim();if(reason.length<3){$('grain-delete-error').textContent='Le motif de suppression est obligatoire.';$('grain-delete-reason')?.focus();return}
+      const submit=$('grain-delete-submit');submit.disabled=true;$('grain-delete-error').textContent='';
+      const fd=new FormData();fd.append('grain_unit_id',String(grainDeleteTarget.id));fd.append('reason',reason);if(grainDeleteEvidenceFile)fd.append('evidence_photo',grainDeleteEvidenceFile,grainDeleteEvidenceFile.name||'evidence.jpg');
+      try{
+        const r=await fetch('/api/grain-deletion-requests',{method:'POST',credentials:'same-origin',body:fd});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'Suppression impossible');
+        const pending=!!data.pending;window.closeGrainDeleteModal();
+        if(pending)alert('⏳ Demande envoyée à un administrateur. Le pot / sac reste visible jusqu’à l’approbation.');
+        else alert('✅ Pot / sac grain supprimé. Le motif a été enregistré dans l’historique.');
+        await loadAll();
+      }catch(e){$('grain-delete-error').textContent=e.message||'Erreur suppression';}
+      finally{submit.disabled=false}
+    };
 
     async function loadAll(renderPanels=true){try{const results=await Promise.allSettled([loadValidatedLcs(),loadReadyP3s(),getJSON('/api/grain-batches'),getJSON('/api/grain-units'),getJSON('/api/grain-protocols')]); if(results[0].status==='fulfilled')validLcs=Array.isArray(results[0].value)?results[0].value:[]; else throw results[0].reason; validP3s=results[1].status==='fulfilled'&&Array.isArray(results[1].value)?results[1].value:[]; batches=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[]; units=results[3].status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value:[]; protocols=results[4].status==='fulfilled'?results[4].value:protocols; syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();renderProtocols();if(results[2].status==='rejected'||results[3].status==='rejected'){$('main-message').innerHTML='Les LC validées sont chargées. Pour créer/ensemencer les pots/sacs grain, remplace aussi <strong>server.js</strong> par celui du ZIP puis redémarre Node.';}}catch(e){$('valid-lc-container').innerHTML='<div class="alert-box alert-red">Erreur chargement API : '+esc(apiErrorMessage(e))+'<br>Vérifie que le serveur est lancé et que la base PostgreSQL est accessible.</div>';console.error(e)}}
 
     document.addEventListener('DOMContentLoaded',()=>{
       $('date-preparation').value=today();$('seed-date').value=today();
+      $('grain-delete-upload')?.addEventListener('change',e=>setGrainDeleteEvidence(e.target.files?.[0]||null));
+      $('grain-delete-camera')?.addEventListener('change',e=>setGrainDeleteEvidence(e.target.files?.[0]||null));
+      $('grain-delete-modal')?.addEventListener('click',e=>{if(e.target===e.currentTarget)closeGrainDeleteModal()});
       $('btn-show-create')?.addEventListener('click',()=>showPanel('panel-create'));
       $('btn-show-seed')?.addEventListener('click',()=>showPanel('panel-seed'));
       $('btn-show-protocol')?.addEventListener('click',()=>showPanel('panel-protocol'));

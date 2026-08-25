@@ -456,7 +456,10 @@ async function ensureUserManagementSchema() {
     ['photo.delete.direct','Supprimer immédiatement'],['photo.delete.approve','Approuver les suppressions'],
     ['lc.delete.request','Demander la suppression d’un pot ou lot LC'],
     ['lc.delete.direct','Supprimer immédiatement un pot ou lot LC'],
-    ['lc.delete.approve','Approuver les suppressions LC']
+    ['lc.delete.approve','Approuver les suppressions LC'],
+    ['grain.delete.request','Demander la suppression d’un pot ou sac grain'],
+    ['grain.delete.direct','Supprimer immédiatement un pot ou sac grain'],
+    ['grain.delete.approve','Approuver les suppressions grain']
   ];
   for (const [code, description] of permissions) await realPool.query(`INSERT INTO app_permissions(code,description) VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET description=EXCLUDED.description`, [code, description]);
   await realPool.query(`
@@ -464,7 +467,7 @@ async function ensureUserManagementSchema() {
     SELECT r.id,p.id FROM app_roles r CROSS JOIN app_permissions p WHERE r.code='admin'
     ON CONFLICT DO NOTHING;
     INSERT INTO app_role_permissions(role_id,permission_id)
-    SELECT r.id,p.id FROM app_roles r JOIN app_permissions p ON p.code IN ('photo.upload','photo.edit','photo.delete.request','lc.delete.request') WHERE r.code='operator'
+    SELECT r.id,p.id FROM app_roles r JOIN app_permissions p ON p.code IN ('photo.upload','photo.edit','photo.delete.request','lc.delete.request','grain.delete.request') WHERE r.code='operator'
     ON CONFLICT DO NOTHING;
   `);
   userManagementSchemaReady = true;
@@ -859,6 +862,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
     await ensureUserManagementSchema();
     await ensurePetriDeletionWorkflowSchema();
     await ensureLcDeletionWorkflowSchema();
+    await ensureGrainDeletionWorkflowSchema();
     await ensureIsoPetrisStorageSchema();
     await ensureLcPotWorkflowSchema();
     await ensureGrainWorkflowSchema();
@@ -1016,7 +1020,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
           `)
         : Promise.resolve({ rows: [{ active: 0, online: 0, total: 0 }] }),
       isAdmin
-        ? realPool.query(`SELECT ((SELECT count(*) FROM photo_deletion_requests WHERE status='pending') + (SELECT count(*) FROM petri_deletion_requests WHERE status='pending') + (SELECT count(*) FROM lc_deletion_requests WHERE status='pending'))::int AS total`)
+        ? realPool.query(`SELECT ((SELECT count(*) FROM photo_deletion_requests WHERE status='pending') + (SELECT count(*) FROM petri_deletion_requests WHERE status='pending') + (SELECT count(*) FROM lc_deletion_requests WHERE status='pending') + (SELECT count(*) FROM grain_deletion_requests WHERE status='pending'))::int AS total`)
         : Promise.resolve({ rows: [{ total: 0 }] })
     ]);
 
@@ -2203,6 +2207,478 @@ app.post('/api/lc-deletion-requests', lcDeletionEvidenceUpload.single('evidence_
       } catch (_) {}
     }
     console.error('POST /api/lc-deletion-requests', e);
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+
+// ============================================================
+// SUPPRESSION POTS / SACS GRAIN AVEC APPROBATION ET JUSTIFICATIF
+// Opérateur : demande administrateur. Admin : suppression immédiate.
+// Motif obligatoire pour tous; photo justificative facultative.
+// ============================================================
+const GRAIN_DELETE_BUCKET = 'grain_issue_delete';
+let grainDeletionSchemaReady = false;
+let grainDeletionBucketReady = false;
+
+async function ensureGrainDeletionWorkflowSchema() {
+  if (grainDeletionSchemaReady) return;
+  await realPool.query(`
+    CREATE TABLE IF NOT EXISTS grain_deletion_requests (
+      id BIGSERIAL PRIMARY KEY,
+      grain_unit_id BIGINT NOT NULL,
+      batch_id BIGINT,
+      unit_code TEXT,
+      batch_code TEXT,
+      container_type TEXT,
+      reason TEXT NOT NULL,
+      evidence_path TEXT,
+      evidence_bucket TEXT NOT NULL DEFAULT 'grain_issue_delete',
+      evidence_mime_type TEXT,
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','cancelled')),
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by UUID,
+      reviewed_by_name TEXT,
+      reviewed_at TIMESTAMPTZ,
+      review_note TEXT
+    );
+    ALTER TABLE grain_deletion_requests ADD COLUMN IF NOT EXISTS evidence_bucket TEXT NOT NULL DEFAULT 'grain_issue_delete';
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_grain_deletion_pending_unit
+      ON grain_deletion_requests(grain_unit_id) WHERE status='pending';
+    CREATE INDEX IF NOT EXISTS ix_grain_deletion_requests_requested_at
+      ON grain_deletion_requests(requested_at DESC);
+
+    CREATE TABLE IF NOT EXISTS grain_deletion_history (
+      id BIGSERIAL PRIMARY KEY,
+      request_id BIGINT,
+      grain_unit_id BIGINT NOT NULL,
+      batch_id BIGINT,
+      unit_code TEXT,
+      batch_code TEXT,
+      container_type TEXT,
+      reason TEXT NOT NULL,
+      evidence_path TEXT,
+      evidence_bucket TEXT NOT NULL DEFAULT 'grain_issue_delete',
+      evidence_mime_type TEXT,
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_by_role TEXT NOT NULL,
+      requested_at TIMESTAMPTZ,
+      approved_by UUID,
+      approved_by_name TEXT,
+      approved_at TIMESTAMPTZ,
+      deletion_mode TEXT NOT NULL CHECK (deletion_mode IN ('admin_direct','operator_approved')),
+      context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      original_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    ALTER TABLE grain_deletion_history ADD COLUMN IF NOT EXISTS evidence_bucket TEXT NOT NULL DEFAULT 'grain_issue_delete';
+    ALTER TABLE grain_deletion_history ADD COLUMN IF NOT EXISTS original_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+    CREATE INDEX IF NOT EXISTS ix_grain_deletion_history_deleted_at
+      ON grain_deletion_history(deleted_at DESC);
+    CREATE INDEX IF NOT EXISTS ix_grain_deletion_history_unit_id
+      ON grain_deletion_history(grain_unit_id, deleted_at DESC);
+  `);
+  grainDeletionSchemaReady = true;
+}
+
+async function ensureGrainDeletionBucket() {
+  if (grainDeletionBucketReady) return;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.getBucket(GRAIN_DELETE_BUCKET);
+  if (!error && data) {
+    grainDeletionBucketReady = true;
+    return;
+  }
+  const { error: createError } = await supabase.storage.createBucket(GRAIN_DELETE_BUCKET, {
+    public: false,
+    fileSizeLimit: 4 * 1024 * 1024,
+    allowedMimeTypes: ['image/jpeg','image/png','image/webp','image/avif','image/heic','image/heif']
+  });
+  if (createError && !/already exists|duplicate/i.test(String(createError.message || ''))) {
+    throw new Error(`Creation bucket ${GRAIN_DELETE_BUCKET} impossible: ${createError.message}`);
+  }
+  grainDeletionBucketReady = true;
+}
+
+async function uploadGrainDeletionEvidence(file, grainUnitId) {
+  if (!file) return null;
+  await ensureGrainDeletionBucket();
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+  const token = crypto.randomBytes(5).toString('hex');
+  const objectPath = `unit/${Number(grainUnitId)}/GRAINDELETE-${stamp}-U${Number(grainUnitId)}-${token}.avif`;
+  let buffer;
+  try {
+    buffer = await sharp(file.buffer)
+      .rotate()
+      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+      .avif({ quality: 58, effort: 4 })
+      .toBuffer();
+  } catch (conversionError) {
+    throw new Error(`Image justificative illisible: ${conversionError.message}`);
+  }
+  const { error } = await getSupabaseAdmin().storage.from(GRAIN_DELETE_BUCKET).upload(objectPath, buffer, {
+    contentType: 'image/avif',
+    cacheControl: '3600',
+    upsert: false
+  });
+  if (error) throw new Error(`Upload image justificative impossible: ${error.message}`);
+  return { path: objectPath, mimeType: 'image/avif' };
+}
+
+async function removeGrainDeletionEvidence(objectPath) {
+  const safePath = String(objectPath || '').trim();
+  if (!safePath) return;
+  try {
+    await ensureGrainDeletionBucket();
+    const { error } = await getSupabaseAdmin().storage.from(GRAIN_DELETE_BUCKET).remove([safePath]);
+    if (error) throw error;
+  } catch (e) {
+    console.error('Suppression image justificative grain:', e.message || e);
+  }
+}
+
+async function signedGrainDeletionEvidenceUrl(objectPath) {
+  const safePath = String(objectPath || '').trim();
+  if (!safePath) return null;
+  try {
+    await ensureGrainDeletionBucket();
+    const { data, error } = await getSupabaseAdmin().storage.from(GRAIN_DELETE_BUCKET).createSignedUrl(safePath, 60 * 60);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  } catch (e) {
+    console.error('URL signee image justificative grain:', e.message || e);
+    return null;
+  }
+}
+
+const grainDeletionEvidenceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: imageFileFilter
+});
+
+async function loadGrainDeletionTarget(db, grainUnitId, lock = false) {
+  const id = Number(grainUnitId);
+  if (!id) return null;
+  const found = await db.query(`
+    SELECT u.*,
+           b.code AS batch_code,
+           b.parent_iso_id,
+           b.parent_iso_code,
+           b.champignon,
+           b.statut AS batch_status,
+           b.nb_units AS batch_units,
+           b.lc_lot_id AS batch_lc_lot_id,
+           b.lc_pot_id AS batch_lc_pot_id,
+           b.lc_code AS batch_lc_code,
+           b.lc_pot_code AS batch_lc_pot_code
+    FROM myc_grain_units u
+    JOIN myc_grain_batches b ON b.id=u.batch_id
+    WHERE u.id=$1
+    ${lock ? 'FOR UPDATE OF u' : ''}
+  `, [id]);
+  if (!found.rows.length) return null;
+  return { grainUnitId: id, batchId: Number(found.rows[0].batch_id), row: found.rows[0] };
+}
+
+async function executeGrainDeletion(client, target) {
+  const unitId = Number(target.grainUnitId);
+  const batchId = Number(target.batchId);
+  const journals = await client.query(`SELECT * FROM myc_grain_journal WHERE grain_unit_id=$1 ORDER BY id`, [unitId]);
+  const references = await client.query(`
+    SELECT * FROM myc_grain_reference_images
+    WHERE grain_unit_id=$1
+       OR journal_id IN (SELECT id FROM myc_grain_journal WHERE grain_unit_id=$1)
+    ORDER BY id
+  `, [unitId]);
+  const originalData = {
+    unit: target.row,
+    journals: journals.rows,
+    reference_images: references.rows
+  };
+
+  // Supprime d'abord les références qui pointeraient vers l'unité/journal supprimé.
+  await client.query(`
+    DELETE FROM myc_grain_reference_images
+    WHERE grain_unit_id=$1
+       OR journal_id IN (SELECT id FROM myc_grain_journal WHERE grain_unit_id=$1)
+  `, [unitId]);
+
+  const deleted = await client.query(`DELETE FROM myc_grain_units WHERE id=$1 RETURNING id,code,batch_id`, [unitId]);
+  if (!deleted.rows.length) throw new Error('Pot/sac grain introuvable ou deja supprime.');
+
+  const counts = await client.query(`
+    SELECT COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE statut='PREPARE')::int AS prepared,
+           COUNT(*) FILTER (WHERE statut <> 'PREPARE')::int AS inoculated
+    FROM myc_grain_units
+    WHERE batch_id=$1
+  `, [batchId]);
+  const c = counts.rows[0] || { total: 0, prepared: 0, inoculated: 0 };
+  let batchStatus = 'PREPARE';
+  if (Number(c.total) === 0) batchStatus = 'SUPPRIME';
+  else if (Number(c.prepared) === 0) batchStatus = 'ENSEMENCE';
+  else if (Number(c.inoculated) > 0) batchStatus = 'PARTIELLEMENT_ENSEMENCE';
+
+  await client.query(
+    `UPDATE myc_grain_batches SET nb_units=$2, statut=$3, updated_at=now() WHERE id=$1`,
+    [batchId, Number(c.total), batchStatus]
+  );
+
+  return {
+    deleted_id: unitId,
+    deleted_code: deleted.rows[0].code,
+    batch_id: batchId,
+    batch_status: batchStatus,
+    originalData
+  };
+}
+
+async function insertGrainDeletionHistory(client, data) {
+  await client.query(`
+    INSERT INTO grain_deletion_history
+      (request_id,grain_unit_id,batch_id,unit_code,batch_code,container_type,reason,
+       evidence_path,evidence_bucket,evidence_mime_type,
+       requested_by,requested_by_name,requested_by_role,requested_at,
+       approved_by,approved_by_name,approved_at,deletion_mode,context_data,original_data)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb)
+  `, [
+    data.requestId || null,
+    Number(data.target.grainUnitId),
+    Number(data.target.batchId),
+    data.target.row.code || null,
+    data.target.row.batch_code || null,
+    data.target.row.container_type || null,
+    data.reason,
+    data.evidencePath || null,
+    GRAIN_DELETE_BUCKET,
+    data.evidenceMimeType || null,
+    data.requestedBy || null,
+    data.requestedByName || 'Utilisateur',
+    data.requestedByRole || 'operator',
+    data.requestedAt || new Date(),
+    data.approvedBy || null,
+    data.approvedByName || null,
+    data.approvedAt || new Date(),
+    data.deletionMode,
+    JSON.stringify(data.contextData || {}),
+    JSON.stringify(data.originalData || {})
+  ]);
+}
+
+function grainDeletionActivity(target, actionType, details = {}) {
+  return {
+    module: 'grain',
+    actionType,
+    itemId: Number(target.grainUnitId),
+    itemLabel: target.row?.code || `Grain unité ${target.grainUnitId}`,
+    details: { target: 'grain_unit', batch_id: target.batchId || null, ...details }
+  };
+}
+
+app.get('/api/admin/grain-deletion-requests', requirePermission('grain.delete.approve'), async (_req, res) => {
+  try {
+    await ensureGrainDeletionWorkflowSchema();
+    const result = await realPool.query(`
+      SELECT * FROM grain_deletion_requests
+      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, requested_at DESC
+      LIMIT 300
+    `);
+    const rows = await Promise.all(result.rows.map(async row => ({
+      ...row,
+      evidence_url: row.evidence_path ? await signedGrainDeletionEvidenceUrl(row.evidence_path) : null
+    })));
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/grain-deletion-requests/:id/reject', requirePermission('grain.delete.approve'), async (req, res) => {
+  try {
+    await ensureGrainDeletionWorkflowSchema();
+    const result = await realPool.query(`
+      UPDATE grain_deletion_requests
+         SET status='rejected', reviewed_by=$2, reviewed_by_name=$3, reviewed_at=now(), review_note=$4
+       WHERE id=$1 AND status='pending'
+       RETURNING *
+    `, [Number(req.params.id), req.adminSession?.userId || null, req.adminSession?.username || 'Admin', String(req.body?.note || '')]);
+    if (!result.rows.length) return res.status(409).json({ error: 'Cette demande a deja ete traitee.' });
+    const row = result.rows[0];
+    const target = { grainUnitId: row.grain_unit_id, batchId: row.batch_id, row: { code: row.unit_code, batch_code: row.batch_code } };
+    if (row.evidence_path) {
+      await removeGrainDeletionEvidence(row.evidence_path);
+      await realPool.query(`UPDATE grain_deletion_requests SET evidence_path=NULL,evidence_mime_type=NULL WHERE id=$1`, [row.id]);
+    }
+    await recordProductionActivity(req, grainDeletionActivity(target, 'delete_rejected', {
+      request_id: row.id,
+      reason: row.reason
+    }));
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/grain-deletion-requests/:id/approve', requirePermission('grain.delete.approve'), async (req, res) => {
+  const client = await realPool.connect();
+  try {
+    await ensureGrainDeletionWorkflowSchema();
+    await ensureGrainWorkflowSchema();
+    await client.query('BEGIN');
+    const locked = await client.query(`SELECT * FROM grain_deletion_requests WHERE id=$1 FOR UPDATE`, [Number(req.params.id)]);
+    if (!locked.rows.length || locked.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Cette demande a deja ete traitee.' });
+    }
+    const requestRow = locked.rows[0];
+    const target = await loadGrainDeletionTarget(client, requestRow.grain_unit_id, true);
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Le pot/sac grain n’existe plus.' });
+    }
+    const deletion = await executeGrainDeletion(client, target);
+    const approvedAt = new Date();
+    await insertGrainDeletionHistory(client, {
+      requestId: requestRow.id,
+      target,
+      reason: requestRow.reason,
+      evidencePath: requestRow.evidence_path,
+      evidenceMimeType: requestRow.evidence_mime_type,
+      requestedBy: requestRow.requested_by,
+      requestedByName: requestRow.requested_by_name,
+      requestedByRole: requestRow.requested_by_role,
+      requestedAt: requestRow.requested_at,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: req.adminSession?.username || 'Admin',
+      approvedAt,
+      deletionMode: 'operator_approved',
+      contextData: requestRow.context_data || {},
+      originalData: deletion.originalData
+    });
+    await client.query(`
+      UPDATE grain_deletion_requests
+         SET status='approved',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=$4,review_note=$5
+       WHERE id=$1
+    `, [requestRow.id, req.adminSession?.userId || null, req.adminSession?.username || 'Admin', approvedAt, String(req.body?.note || '')]);
+    await client.query('COMMIT');
+    await recordProductionActivity(req, grainDeletionActivity(target, 'delete_approved', {
+      request_id: requestRow.id,
+      reason: requestRow.reason
+    }));
+    res.json({ success: true, deleted_id: deletion.deleted_id, deleted_code: deletion.deleted_code, batch_status: deletion.batch_status });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/grain-deletion-requests', grainDeletionEvidenceUpload.single('evidence_photo'), async (req, res) => {
+  let uploadedEvidence = null;
+  try {
+    await ensureGrainDeletionWorkflowSchema();
+    await ensureGrainWorkflowSchema();
+    const role = String(req.adminSession?.role || '');
+    if (!['admin','operator'].includes(role)) return res.status(403).json({ error: 'Ce role ne peut pas supprimer un pot ou sac grain.' });
+    if (role === 'operator' && !hasPermission(req, 'grain.delete.request')) return res.status(403).json({ error: 'Permission de demande de suppression grain refusee.' });
+
+    const grainUnitId = Number(req.body?.grain_unit_id || req.body?.unit_id || 0);
+    const reason = String(req.body?.reason || '').trim();
+    if (!grainUnitId) return res.status(400).json({ error: 'Pot/sac grain invalide.' });
+    if (reason.length < 3) return res.status(400).json({ error: 'Le motif de suppression est obligatoire.' });
+
+    const target = await loadGrainDeletionTarget(realPool, grainUnitId, false);
+    if (!target) return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
+    const contextData = {
+      unit_code: target.row.code || null,
+      batch_code: target.row.batch_code || null,
+      batch_id: target.batchId || null,
+      container_type: target.row.container_type || null,
+      status_before: target.row.statut || null,
+      lc_lot_id: target.row.lc_lot_id || target.row.batch_lc_lot_id || null,
+      lc_pot_id: target.row.lc_pot_id || target.row.batch_lc_pot_id || null,
+      source_petri_id: target.row.source_petri_id || null
+    };
+
+    if (role === 'operator') {
+      const duplicate = await realPool.query(`SELECT id FROM grain_deletion_requests WHERE grain_unit_id=$1 AND status='pending' LIMIT 1`, [grainUnitId]);
+      if (duplicate.rows.length) return res.status(409).json({ error: 'Une demande de suppression est deja en attente pour ce pot/sac grain.' });
+      if (req.file) uploadedEvidence = await uploadGrainDeletionEvidence(req.file, grainUnitId);
+      const created = await realPool.query(`
+        INSERT INTO grain_deletion_requests
+          (grain_unit_id,batch_id,unit_code,batch_code,container_type,reason,
+           evidence_path,evidence_bucket,evidence_mime_type,context_data,
+           requested_by,requested_by_name,requested_by_role)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
+        RETURNING *
+      `, [
+        grainUnitId, target.batchId || null, target.row.code || null, target.row.batch_code || null, target.row.container_type || null, reason,
+        uploadedEvidence?.path || null, GRAIN_DELETE_BUCKET, uploadedEvidence?.mimeType || null, JSON.stringify(contextData),
+        req.adminSession?.userId || null, req.adminSession?.username || 'Operateur', role
+      ]);
+      await recordProductionActivity(req, grainDeletionActivity(target, 'delete_requested', {
+        request_id: created.rows[0].id,
+        reason,
+        evidence: Boolean(uploadedEvidence)
+      }));
+      return res.status(202).json({ success: true, pending: true, request_id: created.rows[0].id, message: 'Demande envoyee a un administrateur.' });
+    }
+
+    if (req.file) uploadedEvidence = await uploadGrainDeletionEvidence(req.file, grainUnitId);
+    const client = await realPool.connect();
+    try {
+      await client.query('BEGIN');
+      const lockedTarget = await loadGrainDeletionTarget(client, grainUnitId, true);
+      if (!lockedTarget) {
+        await client.query('ROLLBACK');
+        if (uploadedEvidence?.path) await removeGrainDeletionEvidence(uploadedEvidence.path);
+        return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
+      }
+      const deletion = await executeGrainDeletion(client, lockedTarget);
+      const now = new Date();
+      await insertGrainDeletionHistory(client, {
+        target: lockedTarget,
+        reason,
+        evidencePath: uploadedEvidence?.path || null,
+        evidenceMimeType: uploadedEvidence?.mimeType || null,
+        requestedBy: req.adminSession?.userId || null,
+        requestedByName: req.adminSession?.username || 'Admin',
+        requestedByRole: 'admin',
+        requestedAt: now,
+        approvedBy: req.adminSession?.userId || null,
+        approvedByName: req.adminSession?.username || 'Admin',
+        approvedAt: now,
+        deletionMode: 'admin_direct',
+        contextData,
+        originalData: deletion.originalData
+      });
+      await client.query(`
+        UPDATE grain_deletion_requests
+           SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),
+               review_note=COALESCE(NULLIF(review_note,''),'Suppression directe par administrateur')
+         WHERE grain_unit_id=$1 AND status='pending'
+      `, [grainUnitId, req.adminSession?.userId || null, req.adminSession?.username || 'Admin']);
+      await client.query('COMMIT');
+      await recordProductionActivity(req, grainDeletionActivity(lockedTarget, 'delete_approved', {
+        direct_admin: true,
+        reason,
+        evidence: Boolean(uploadedEvidence)
+      }));
+      return res.json({ success: true, pending: false, deleted_id: deletion.deleted_id, deleted_code: deletion.deleted_code, batch_status: deletion.batch_status });
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      if (uploadedEvidence?.path) await removeGrainDeletionEvidence(uploadedEvidence.path);
+      throw e;
+    } finally { client.release(); }
+  } catch (e) {
+    if (uploadedEvidence?.path && String(req.adminSession?.role || '') === 'operator') {
+      try {
+        const found = await realPool.query(`SELECT 1 FROM grain_deletion_requests WHERE evidence_path=$1 LIMIT 1`, [uploadedEvidence.path]);
+        if (!found.rows.length) await removeGrainDeletionEvidence(uploadedEvidence.path);
+      } catch (_) {}
+    }
+    console.error('POST /api/grain-deletion-requests', e);
     return res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -5712,53 +6188,14 @@ app.post('/api/grain-units/:id/stock', async (req, res) => {
 });
 
 app.delete('/api/grain-units/:id', async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await ensureGrainWorkflowSchema();
-    const id = Number(req.params.id || 0);
-    if (!id) return res.status(400).json({ error: 'id pot/sac invalide' });
-
-    await client.query('BEGIN');
-    const cur = await client.query(
-      `SELECT id, code, batch_id FROM myc_grain_units WHERE id=$1 FOR UPDATE`,
-      [id]
-    );
-    if (!cur.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Pot/sac introuvable' });
-    }
-    const unit = cur.rows[0];
-    const batchId = Number(unit.batch_id);
-
-    await client.query(`DELETE FROM myc_grain_units WHERE id=$1`, [id]);
-
-    const counts = await client.query(`
-      SELECT COUNT(*)::int AS total,
-             COUNT(*) FILTER (WHERE statut='PREPARE')::int AS prepared,
-             COUNT(*) FILTER (WHERE statut <> 'PREPARE')::int AS inoculated
-      FROM myc_grain_units
-      WHERE batch_id=$1
-    `, [batchId]);
-    const c = counts.rows[0] || { total: 0, prepared: 0, inoculated: 0 };
-    let statut = 'PREPARE';
-    if (Number(c.total) === 0) statut = 'SUPPRIME';
-    else if (Number(c.prepared) === 0) statut = 'ENSEMENCE';
-    else if (Number(c.inoculated) > 0) statut = 'PARTIELLEMENT_ENSEMENCE';
-
-    await client.query(
-      `UPDATE myc_grain_batches SET nb_units=$2, statut=$3, updated_at=now() WHERE id=$1`,
-      [batchId, Number(c.total), statut]
-    );
-
-    await client.query('COMMIT');
-    res.json({ ok: true, deleted_id: id, deleted_code: unit.code, batch_id: batchId, batch_status: statut });
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error('DELETE /api/grain-units/:id', e);
-    res.status(500).json({ error: e.message });
-  } finally {
-    client.release();
+  // La suppression brute est volontairement désactivée afin qu'aucun utilisateur,
+  // y compris un administrateur, ne puisse contourner le motif obligatoire.
+  if (req.adminSession?.role !== 'admin') {
+    return res.status(403).json({ error: 'Un opérateur doit envoyer une demande de suppression grain à un administrateur.' });
   }
+  return res.status(400).json({
+    error: 'Suppression directe désactivée. Utilisez le formulaire de suppression avec motif obligatoire.'
+  });
 });
 
 
