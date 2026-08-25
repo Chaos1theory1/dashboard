@@ -691,6 +691,75 @@
     }
     .btn-delete-iso:hover { background: #922b21; }
 
+
+    /* Suppression isolation : confirmation forte + re-authentification Admin */
+    .iso-delete-modal {
+      position: fixed; inset: 0; z-index: 10060; display: none;
+      align-items: center; justify-content: center; padding: 18px;
+      background: rgba(24, 8, 8, .72); backdrop-filter: blur(5px);
+    }
+    .iso-delete-card {
+      width: min(650px, 100%); max-height: 92vh; overflow: auto;
+      background: #fff; border-radius: 18px; border: 1px solid #f1c2bd;
+      box-shadow: 0 28px 90px rgba(70, 10, 10, .38);
+    }
+    .iso-delete-head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+      padding: 20px 22px; color: #fff;
+      background: linear-gradient(135deg, #9f241b 0%, #c0392b 100%);
+      border-radius: 17px 17px 0 0;
+    }
+    .iso-delete-head-main { display: flex; align-items: center; gap: 14px; }
+    .iso-delete-danger-icon {
+      width: 46px; height: 46px; flex: 0 0 46px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.34);
+      font-size: 24px; font-weight: 900;
+    }
+    .iso-delete-head h4 { margin: 0 0 3px; color: #fff; font-size: 20px; }
+    .iso-delete-head p { margin: 0; color: rgba(255,255,255,.9); font-size: 12px; }
+    .iso-delete-close {
+      border: 0; background: rgba(255,255,255,.14); color: #fff; width: 34px; height: 34px;
+      border-radius: 9px; font-size: 22px; line-height: 1; cursor: pointer;
+    }
+    .iso-delete-body { padding: 22px; }
+    .iso-delete-target {
+      padding: 13px 15px; margin-bottom: 16px; border-radius: 11px;
+      background: #fff1ef; border: 1px solid #f3c9c4; color: #76251e;
+    }
+    .iso-delete-target strong { color: #5f1711; }
+    .iso-delete-warning-box {
+      padding: 15px 16px; margin-bottom: 18px; border-radius: 12px;
+      background: #fff8e8; border-left: 5px solid #e09a17; color: #624611;
+      font-size: 13px; line-height: 1.55;
+    }
+    .iso-delete-warning-box strong { color: #8b2d24; }
+    .iso-delete-impact-list { margin: 9px 0 0 18px; padding: 0; }
+    .iso-delete-impact-list li { margin: 4px 0; }
+    .iso-delete-password-wrap {
+      padding: 16px; border-radius: 12px; background: #f8faf9; border: 1px solid #dce5df;
+    }
+    .iso-delete-password {
+      width: 100%; height: 48px; box-sizing: border-box; border: 1px solid #c9d4cd;
+      border-radius: 9px; padding: 10px 12px; font-size: 14px; background: #fff;
+    }
+    .iso-delete-password:focus { outline: 0; border-color: #c0392b; box-shadow: 0 0 0 3px rgba(192,57,43,.10); }
+    .iso-delete-error { min-height: 20px; margin-top: 10px; color: #b02a20; font-weight: 800; font-size: 12px; }
+    .iso-delete-actions {
+      display: flex; justify-content: flex-end; gap: 10px; padding: 0 22px 22px;
+    }
+    .iso-delete-confirm {
+      border: 0; border-radius: 10px; padding: 12px 16px; min-width: 220px;
+      background: #c0392b; color: #fff; font-weight: 900; cursor: pointer;
+    }
+    .iso-delete-confirm:hover:not(:disabled) { background: #922b21; }
+    .iso-delete-confirm:disabled { opacity: .48; cursor: not-allowed; }
+    @media (max-width: 600px) {
+      .iso-delete-actions { flex-direction: column-reverse; }
+      .iso-delete-actions button { width: 100%; }
+      .iso-delete-confirm { min-width: 0; }
+    }
+
   </style>
 </head>
 
@@ -1214,6 +1283,47 @@
     </div>
   </section>
 
+  <div id="iso-delete-modal" class="iso-delete-modal" role="dialog" aria-modal="true" aria-labelledby="iso-delete-title">
+    <div class="iso-delete-card">
+      <div class="iso-delete-head">
+        <div class="iso-delete-head-main">
+          <div class="iso-delete-danger-icon" aria-hidden="true">!</div>
+          <div>
+            <h4 id="iso-delete-title">Suppression définitive de l’isolation</h4>
+            <p>Action administrateur à haut impact — re-authentification obligatoire</p>
+          </div>
+        </div>
+        <button type="button" class="iso-delete-close" aria-label="Fermer" onclick="closeIsolationDeleteModal()">×</button>
+      </div>
+      <div class="iso-delete-body">
+        <div class="iso-delete-target">
+          <strong>Isolation ciblée :</strong> <span id="iso-delete-target-label">—</span>
+        </div>
+        <div class="iso-delete-warning-box">
+          <strong>Attention : cette opération est irréversible.</strong><br>
+          La suppression peut retirer les données directement rattachées à cette isolation, notamment :
+          <ul class="iso-delete-impact-list">
+            <li>boîtes de Pétri et données de suivi associées ;</li>
+            <li>géloses, journaux et photos liés ;</li>
+            <li>solutions nutritives rattachées ;</li>
+            <li>l’isolation elle-même.</li>
+          </ul>
+          Vérifiez soigneusement le code de l’isolation avant de continuer.
+        </div>
+        <div class="iso-delete-password-wrap">
+          <label class="form-label" for="iso-delete-admin-password">Mot de passe administrateur *</label>
+          <input id="iso-delete-admin-password" class="iso-delete-password" type="password" autocomplete="current-password" placeholder="Saisissez votre mot de passe administrateur" />
+          <small style="display:block;color:#6d7a72;margin-top:7px;line-height:1.45;">Votre mot de passe sert uniquement à confirmer cette action et n’est pas enregistré.</small>
+          <div id="iso-delete-error" class="iso-delete-error" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="iso-delete-actions">
+        <button type="button" class="btn-action btn-grey" onclick="closeIsolationDeleteModal()">Annuler</button>
+        <button type="button" class="iso-delete-confirm" id="iso-delete-confirm" onclick="submitIsolationDeletion()" disabled>Supprimer définitivement</button>
+      </div>
+    </div>
+  </div>
+
   <div id="petri-delete-modal" class="petri-delete-modal" role="dialog" aria-modal="true" aria-labelledby="petri-delete-title">
     <div class="petri-delete-card">
       <div class="petri-delete-head">
@@ -1391,8 +1501,23 @@
         return await res.json();
       }
 
+      async function ensureCurrentAdminRole() {
+        let role = String(window.currentAdminRole || '').trim().toLowerCase();
+        if (role) return role;
+        try {
+          const session = await apiGet('/api/auth/session');
+          role = String(session?.user?.role || '').trim().toLowerCase();
+          window.currentAdminRole = role;
+        } catch (_) {
+          role = '';
+        }
+        return role;
+      }
+
       async function loadHistorique() {
         try {
+          const currentRole = await ensureCurrentAdminRole();
+          const isAdmin = currentRole === 'admin';
           const list = await apiGet("/api/isolements?status=TOUS");
           if (!list || !list.length) {
             historiqueTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Aucune isolation</td></tr>';
@@ -1401,14 +1526,16 @@
 
           historiqueTbody.innerHTML = list.map(iso => {
             const selected = selectedIsoId === iso.id ? "iso-selected" : "";
+            const deleteAction = isAdmin
+              ? '<button type="button" class="btn-delete-iso" data-delete-iso-id="' + Number(iso.id) + '">🗑️ Supprimer</button>'
+              : '';
             return '<tr class="' + selected + '" data-iso-id="' + iso.id + '">' +
               '<td><strong>' + (iso.code || iso.id) + '</strong></td>' +
               '<td>' + (iso.statut || "—") + '</td>' +
               '<td>' + getEspeceLabel(iso.cycle_type) + '</td>' +
               '<td>' + ((iso.champignon || "").trim() || "—") + '</td>' +
               '<td>' + String(iso.created_at || "").slice(0, 10) + '</td>' +
-              '<td><button type="button" class="btn-delete-iso" onclick="deleteIsolation(event, ' + iso.id + ', \''
-                + String(iso.code || iso.id).replace(/'/g, "\\'") + '\')">🗑️ Supprimer</button></td>' +
+              '<td>' + deleteAction + '</td>' +
             '</tr>';
           }).join("");
 
@@ -1418,47 +1545,108 @@
               selectIsolation(isoId);
             });
           });
+
+          if (isAdmin) {
+            historiqueTbody.querySelectorAll('.btn-delete-iso[data-delete-iso-id]').forEach(function(button) {
+              button.addEventListener('click', function(event) {
+                const isoId = Number(button.getAttribute('data-delete-iso-id'));
+                const target = list.find(function(item) { return Number(item.id) === isoId; });
+                openIsolationDeleteModal(event, isoId, target?.code || isoId);
+              });
+            });
+          }
         } catch (e) {
           console.error(e);
           historiqueTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:red;">Erreur</td></tr>';
         }
       }
 
+      let isolationDeleteTargetId = null;
+      let isolationDeleteTargetCode = '';
 
-      async function deleteIsolation(event, isoId, isoCode) {
+      async function openIsolationDeleteModal(event, isoId, isoCode) {
         if (event) {
           event.preventDefault();
           event.stopPropagation();
         }
-
         if (!isoId) return;
 
-        const message =
-          "Supprimer définitivement l’isolation " + (isoCode || isoId) + " ?\n\n" +
-          "Cette action supprimera aussi tout ce qui est relié :\n" +
-          "• boîtes de Pétri\n" +
-          "• géloses\n" +
-          "• journaux et photos\n" +
-          "• solutions nutritives\n" +
-          "• souches internes et lots LC liés\n\n" +
-          "Action irréversible.";
+        const role = await ensureCurrentAdminRole();
+        if (role !== 'admin') {
+          return;
+        }
 
-        if (!confirm(message)) return;
+        isolationDeleteTargetId = Number(isoId);
+        isolationDeleteTargetCode = String(isoCode || isoId);
+        document.getElementById('iso-delete-target-label').textContent = isolationDeleteTargetCode;
+        const passwordInput = document.getElementById('iso-delete-admin-password');
+        const errorBox = document.getElementById('iso-delete-error');
+        const confirmButton = document.getElementById('iso-delete-confirm');
+        passwordInput.value = '';
+        errorBox.textContent = '';
+        confirmButton.disabled = true;
+        confirmButton.textContent = 'Supprimer définitivement';
+        document.getElementById('iso-delete-modal').style.display = 'flex';
+        setTimeout(function() { passwordInput.focus(); }, 60);
+      }
+
+      function closeIsolationDeleteModal() {
+        const modal = document.getElementById('iso-delete-modal');
+        const passwordInput = document.getElementById('iso-delete-admin-password');
+        const errorBox = document.getElementById('iso-delete-error');
+        const confirmButton = document.getElementById('iso-delete-confirm');
+        if (modal) modal.style.display = 'none';
+        if (passwordInput) passwordInput.value = '';
+        if (errorBox) errorBox.textContent = '';
+        if (confirmButton) {
+          confirmButton.disabled = true;
+          confirmButton.textContent = 'Supprimer définitivement';
+        }
+        isolationDeleteTargetId = null;
+        isolationDeleteTargetCode = '';
+      }
+
+      async function submitIsolationDeletion() {
+        const isoId = Number(isolationDeleteTargetId);
+        const passwordInput = document.getElementById('iso-delete-admin-password');
+        const errorBox = document.getElementById('iso-delete-error');
+        const confirmButton = document.getElementById('iso-delete-confirm');
+        const adminPassword = String(passwordInput?.value || '');
+
+        if (!isoId) return;
+        if ((await ensureCurrentAdminRole()) !== 'admin') {
+          errorBox.textContent = 'Cette action est réservée aux administrateurs.';
+          return;
+        }
+        if (!adminPassword) {
+          errorBox.textContent = 'Saisissez votre mot de passe administrateur pour confirmer.';
+          passwordInput?.focus();
+          return;
+        }
+
+        confirmButton.disabled = true;
+        confirmButton.textContent = 'Suppression en cours…';
+        errorBox.textContent = '';
 
         try {
           const res = await fetch(API_BASE + "/api/isolements/" + isoId, {
             method: "DELETE",
-            headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ admin_password: adminPassword })
           });
+
+          // Effacer la valeur locale dès que le serveur a reçu la demande.
+          passwordInput.value = '';
 
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.ok === false) {
             throw new Error(data.error || "Erreur suppression");
           }
 
-          alert("✅ Isolation supprimée.");
+          closeIsolationDeleteModal();
+          alert("✅ Isolation supprimée définitivement.");
 
-          if (Number(selectedIsoId) === Number(isoId)) {
+          if (Number(selectedIsoId) === isoId) {
             deselectIsolation();
             const petrisListContainer = document.getElementById("petris-list-container");
             if (petrisListContainer) petrisListContainer.style.display = "none";
@@ -1468,11 +1656,32 @@
           await loadHistorique();
         } catch (e) {
           console.error(e);
-          alert("❌ Erreur suppression isolation : " + e.message);
+          errorBox.textContent = e.message || 'Suppression impossible.';
+          confirmButton.textContent = 'Supprimer définitivement';
+          confirmButton.disabled = !String(passwordInput.value || '').trim();
+          passwordInput?.focus();
         }
       }
 
-      window.deleteIsolation = deleteIsolation;
+      window.openIsolationDeleteModal = openIsolationDeleteModal;
+      window.closeIsolationDeleteModal = closeIsolationDeleteModal;
+      window.submitIsolationDeletion = submitIsolationDeletion;
+
+      const isoDeletePasswordInput = document.getElementById('iso-delete-admin-password');
+      if (isoDeletePasswordInput) {
+        isoDeletePasswordInput.addEventListener('input', function() {
+          const button = document.getElementById('iso-delete-confirm');
+          const errorBox = document.getElementById('iso-delete-error');
+          if (button) button.disabled = !String(isoDeletePasswordInput.value || '').trim();
+          if (errorBox) errorBox.textContent = '';
+        });
+        isoDeletePasswordInput.addEventListener('keydown', function(event) {
+          if (event.key === 'Enter' && String(isoDeletePasswordInput.value || '').trim()) {
+            event.preventDefault();
+            submitIsolationDeletion();
+          }
+        });
+      }
 
 
       function normalizeJsonObject(value) {

@@ -76,6 +76,59 @@ function createSupabaseLoginClient() {
   return createSupabaseClient(url,key,{ auth:{ persistSession:false,autoRefreshToken:false,detectSessionInUrl:false } });
 }
 
+function timingSafeSecretEqual(left, right) {
+  const a = crypto.createHash("sha256").update(String(left || ""), "utf8").digest();
+  const b = crypto.createHash("sha256").update(String(right || ""), "utf8").digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Re-authentification pour les actions administrateur à fort impact.
+// Le mot de passe n'est jamais stocké, journalisé ou renvoyé au client.
+async function verifyCurrentAdminPassword(req, password) {
+  const session = req.adminSession || {};
+  const suppliedPassword = String(password || "");
+
+  if (session.role !== "admin") {
+    return { ok: false, status: 403, error: "Action réservée aux administrateurs." };
+  }
+  if (!suppliedPassword) {
+    return { ok: false, status: 400, error: "Le mot de passe administrateur est requis." };
+  }
+
+  // Compte de récupération configuré via les variables d'environnement Vercel.
+  if (!session.userId) {
+    if (!ADMIN_PASSWORD) {
+      return { ok: false, status: 503, error: "Mot de passe du compte administrateur de récupération non configuré." };
+    }
+    const sameUser = String(session.username || "") === ADMIN_USERNAME;
+    const valid = sameUser && timingSafeSecretEqual(suppliedPassword, ADMIN_PASSWORD);
+    return valid
+      ? { ok: true }
+      : { ok: false, status: 401, error: "Mot de passe administrateur incorrect." };
+  }
+
+  // Comptes administrateurs gérés par Supabase Auth : re-authentification réelle.
+  await ensureUserManagementSchema();
+  const access = await loadApplicationUser(session.userId);
+  if (!access || !access.active || access.role !== "admin" || !access.email) {
+    return { ok: false, status: 403, error: "Compte administrateur non autorisé." };
+  }
+
+  try {
+    const supabase = createSupabaseLoginClient();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: String(access.email).trim().toLowerCase(),
+      password: suppliedPassword
+    });
+    const valid = !error && data?.user && String(data.user.id) === String(session.userId);
+    return valid
+      ? { ok: true }
+      : { ok: false, status: 401, error: "Mot de passe administrateur incorrect." };
+  } catch (_) {
+    return { ok: false, status: 401, error: "Mot de passe administrateur incorrect." };
+  }
+}
+
 function createSessionToken({ username, role = "admin", userId = null, hours = SESSION_HOURS }) {
   const payload = Buffer.from(JSON.stringify({
     username,
@@ -3096,6 +3149,17 @@ app.get("/api/isolements/:id/solutions-nutritives", async (req, res) => {
 app.delete("/api/isolements/:id", async (req, res) => {
   const isolationId = Number(req.params.id);
   if (!isolationId) return res.status(400).json({ error: "id invalide" });
+
+  // Défense en profondeur : le bouton est caché côté UI, mais l'API elle-même
+  // refuse aussi toute suppression d'isolation hors rôle administrateur.
+  if (req.adminSession?.role !== "admin") {
+    return res.status(403).json({ error: "Seul un administrateur peut supprimer une isolation." });
+  }
+
+  const passwordCheck = await verifyCurrentAdminPassword(req, req.body?.admin_password);
+  if (!passwordCheck.ok) {
+    return res.status(passwordCheck.status || 401).json({ error: passwordCheck.error });
+  }
 
   const client = await pool.connect();
   try {
