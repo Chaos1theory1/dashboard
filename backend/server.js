@@ -1061,11 +1061,11 @@ app.get('/api/dashboard/summary', async (req, res) => {
       {
         id: 'new-grain',
         label: 'Préparer du grain',
-        description: validatedLc ? `${validatedLc} pot${validatedLc > 1 ? 's' : ''} LC validé${validatedLc > 1 ? 's' : ''}.` : 'Aucun pot LC validé actuellement.',
+        description: (validatedLc || p3Ready) ? `${validatedLc} LC validée${validatedLc > 1 ? 's' : ''} · ${p3Ready} P3 prêt${p3Ready > 1 ? 's' : ''}.` : 'Aucune LC validée ni P3 transférable actuellement.',
         href: 'admin-myc-grain.html',
         icon: 'wheat',
-        enabled: canWrite && validatedLc > 0,
-        badge: `${validatedLc} LC validée${validatedLc > 1 ? 's' : ''}`
+        enabled: canWrite && (validatedLc > 0 || p3Ready > 0),
+        badge: `${validatedLc} LC · ${p3Ready} P3`
       }
     ];
 
@@ -5629,8 +5629,8 @@ app.get('/api/lc-workflow/lots/:id/references', async (req, res) => {
 
 // ============================================================
 // MYCELIUM SUR GRAIN - workflow pot/sac individuel
-// - LC validee -> preparation pots/sacs de grain sterile
-// - semencement unitaire
+// - preparation pots/sacs de grain sterile liee a une isolation
+// - semencement unitaire depuis une LC validee OU directement depuis un P3 piquable
 // - journal quotidien + photo reference
 // - protocoles de comparaison derives des donnees
 // ============================================================
@@ -5678,6 +5678,9 @@ async function ensureGrainWorkflowSchema() {
       water_l NUMERIC DEFAULT 0,
       additional_components JSONB DEFAULT '[]'::jsonb,
       statut TEXT DEFAULT 'PREPARE',
+      inoculation_source_type TEXT,
+      source_grain_unit_id BIGINT,
+      source_grain_unit_code TEXT,
       lc_lot_id BIGINT,
       lc_pot_id BIGINT,
       lc_code TEXT,
@@ -5698,7 +5701,10 @@ async function ensureGrainWorkflowSchema() {
     CREATE TABLE IF NOT EXISTS myc_grain_inoculations (
       id BIGSERIAL PRIMARY KEY,
       code TEXT UNIQUE NOT NULL,
-      lc_lot_id BIGINT NOT NULL,
+      inoculation_source_type TEXT NOT NULL DEFAULT 'LC',
+      source_grain_unit_id BIGINT,
+      source_grain_unit_code TEXT,
+      lc_lot_id BIGINT,
       lc_pot_id BIGINT,
       lc_code TEXT,
       lc_pot_code TEXT,
@@ -5760,17 +5766,69 @@ async function ensureGrainWorkflowSchema() {
   await realPool.query(`ALTER TABLE myc_grain_batches ADD COLUMN IF NOT EXISTS p3_code TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS source_petri_id BIGINT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS p3_code TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS inoculation_source_type TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS source_grain_unit_id BIGINT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS source_grain_unit_code TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_at TIMESTAMP WITH TIME ZONE`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_location TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_note TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_operator TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_inoculations ALTER COLUMN lc_lot_id DROP NOT NULL`);
+  await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS inoculation_source_type TEXT DEFAULT 'LC'`);
+  await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS source_grain_unit_id BIGINT`);
+  await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS source_grain_unit_code TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS source_petri_id BIGINT`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS p3_code TEXT`);
+  await realPool.query(`
+    UPDATE myc_grain_inoculations
+    SET inoculation_source_type = CASE
+      WHEN source_grain_unit_id IS NOT NULL THEN 'GRAIN'
+      WHEN lc_lot_id IS NOT NULL THEN 'LC'
+      WHEN source_petri_id IS NOT NULL THEN 'P3'
+      ELSE 'LC'
+    END
+    WHERE inoculation_source_type IS NULL OR inoculation_source_type NOT IN ('LC','P3','GRAIN');
+    ALTER TABLE myc_grain_inoculations ALTER COLUMN inoculation_source_type SET DEFAULT 'LC';
+    ALTER TABLE myc_grain_inoculations ALTER COLUMN inoculation_source_type SET NOT NULL;
+
+    UPDATE myc_grain_units
+    SET inoculation_source_type = CASE
+      WHEN source_grain_unit_id IS NOT NULL THEN 'GRAIN'
+      WHEN lc_lot_id IS NOT NULL THEN 'LC'
+      WHEN source_petri_id IS NOT NULL AND inoculated_at IS NOT NULL THEN 'P3'
+      ELSE inoculation_source_type
+    END
+    WHERE inoculation_source_type IS NULL AND inoculated_at IS NOT NULL;
+
+    ALTER TABLE myc_grain_inoculations DROP CONSTRAINT IF EXISTS chk_grain_inoculation_source_type;
+    ALTER TABLE myc_grain_inoculations
+      ADD CONSTRAINT chk_grain_inoculation_source_type CHECK (inoculation_source_type IN ('LC','P3','GRAIN'));
+    ALTER TABLE myc_grain_units DROP CONSTRAINT IF EXISTS chk_grain_unit_source_type;
+    ALTER TABLE myc_grain_units
+      ADD CONSTRAINT chk_grain_unit_source_type CHECK (inoculation_source_type IS NULL OR inoculation_source_type IN ('LC','P3','GRAIN'));
+  `);
 
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_batch ON myc_grain_units(batch_id)`);
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_statut ON myc_grain_units(statut)`);
+  await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_source ON myc_grain_units(inoculation_source_type, source_petri_id, lc_pot_id)`);
+  await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_source_grain ON myc_grain_units(source_grain_unit_id) WHERE source_grain_unit_id IS NOT NULL`);
+  await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_inoculations_source_grain ON myc_grain_inoculations(source_grain_unit_id) WHERE source_grain_unit_id IS NOT NULL`);
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_batches_lc ON myc_grain_batches(lc_lot_id, lc_pot_id)`);
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_journal_unit_day ON myc_grain_journal(grain_unit_id, day_index)`);
+  await realPool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_myc_grain_units_source_grain') THEN
+        ALTER TABLE myc_grain_units
+          ADD CONSTRAINT fk_myc_grain_units_source_grain
+          FOREIGN KEY (source_grain_unit_id) REFERENCES myc_grain_units(id) ON DELETE SET NULL;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_myc_grain_inoculations_source_grain') THEN
+        ALTER TABLE myc_grain_inoculations
+          ADD CONSTRAINT fk_myc_grain_inoculations_source_grain
+          FOREIGN KEY (source_grain_unit_id) REFERENCES myc_grain_units(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
 
   grainWorkflowSchemaReady = true;
 }
@@ -5820,6 +5878,39 @@ async function getValidatedLcSelection(lcLotId, lcPotId) {
     ORDER BY p.lc_validated_at DESC NULLS LAST, p.pot_number ASC
     LIMIT 1
   `, params);
+  return q.rows[0] || null;
+}
+
+async function getValidatedP3Selection(petriId) {
+  await ensureLcPotWorkflowSchema();
+  const id = Number(petriId || 0);
+  if (!id) return null;
+  const q = await pool.query(`
+    WITH last_j AS (
+      SELECT DISTINCT ON (petri_id)
+        petri_id, day_index, is_pickable, choices, visual_note20, treated_at
+      FROM iso_petri_journal
+      WHERE petri_id=$1
+      ORDER BY petri_id, day_index DESC, treated_at DESC, id DESC
+    )
+    SELECT p.id AS source_petri_id,
+           p.isolement_id AS parent_iso_id,
+           i.code AS parent_iso_code,
+           COALESCE(i.champignon,'') AS champignon,
+           COALESCE(i.code,'ISO') || '-P3-' || p.id::text AS p3_code,
+           lj.day_index AS last_day,
+           lj.visual_note20,
+           COALESCE(lj.is_pickable,FALSE) AS is_pickable,
+           COALESCE((lj.choices->>'is_pickable')::boolean,FALSE) AS choices_pickable
+    FROM iso_petris p
+    JOIN isolements i ON i.id=p.isolement_id
+    LEFT JOIN last_j lj ON lj.petri_id=p.id
+    WHERE p.id=$1
+      AND p.phase=3
+      AND p.deleted_at IS NULL
+      AND (COALESCE(lj.is_pickable,FALSE)=TRUE OR COALESCE((lj.choices->>'is_pickable')::boolean,FALSE)=TRUE)
+    LIMIT 1
+  `,[id]);
   return q.rows[0] || null;
 }
 
@@ -6220,7 +6311,7 @@ app.get('/api/grain-lots', async (req, res) => {
 
 app.post('/api/grain-lots', async (req, res) => {
   res.status(400).json({
-    error: 'Route ancienne desactivee : utilisez POST /api/grain-batches avec une LC validee.'
+    error: 'Route ancienne desactivee : utilisez POST /api/grain-batches avec une isolation selectionnee.'
   });
 });
 
@@ -6229,21 +6320,106 @@ app.post('/api/grain-inoculations', async (req, res) => {
   try {
     await ensureGrainWorkflowSchema();
     const b = req.body || {};
-    const lcLotId = Number(b.lc_lot_id || 0);
-    const lcPotId = Number(b.lc_pot_id || 0);
-    const selectedLc = await getValidatedLcSelection(lcLotId, lcPotId || null);
-    if (!selectedLc) return res.status(400).json({ error: 'Selection LC invalide : choisissez une LC validee.' });
+    const sourceType = String(b.inoculation_source_type || b.source_type || 'LC').trim().toUpperCase();
+    if (!['LC','P3','GRAIN'].includes(sourceType)) {
+      return res.status(400).json({ error: "Source d'inoculation invalide. Utilisez LC, P3 ou GRAIN." });
+    }
+
+    let selectedLc = null;
+    let selectedP3 = null;
+    let selectedSourceGrain = null;
+    let sourceGrainUnitId = null;
+    let sourceGrainUnitCode = null;
+    let sourcePetriId = 0;
+    let p3Code = '';
+    let sourceParentIsoId = 0;
+    let lcLotId = null;
+    let lcPotId = null;
+    let lcCode = null;
+    let lcPotCode = null;
+
+    if (sourceType === 'LC') {
+      lcLotId = Number(b.lc_lot_id || 0);
+      lcPotId = Number(b.lc_pot_id || 0) || null;
+      selectedLc = await getValidatedLcSelection(lcLotId, lcPotId);
+      if (!selectedLc) return res.status(400).json({ error: 'Selection LC invalide : choisissez une LC validee.' });
+      sourcePetriId = Number(selectedLc.source_petri_id || 0);
+      p3Code = String(selectedLc.p3_code || '');
+      sourceParentIsoId = Number(selectedLc.parent_iso_id || 0);
+      lcLotId = Number(selectedLc.lc_lot_id);
+      lcPotId = selectedLc.lc_pot_id ? Number(selectedLc.lc_pot_id) : null;
+      lcCode = selectedLc.lc_code || null;
+      lcPotCode = selectedLc.lc_pot_code || null;
+
+      // Si le frontend transmet le P3 choisi, il doit etre celui qui a produit la LC validee.
+      const requestedP3Id = Number(b.source_petri_id || b.p3_id || 0);
+      if (requestedP3Id && sourcePetriId && requestedP3Id !== sourcePetriId) {
+        return res.status(400).json({ error: 'La LC selectionnee ne provient pas du P3 choisi.' });
+      }
+    } else if (sourceType === 'P3') {
+      sourcePetriId = Number(b.source_petri_id || b.p3_id || 0);
+      selectedP3 = await getValidatedP3Selection(sourcePetriId);
+      if (!selectedP3) {
+        return res.status(400).json({ error: 'P3 invalide : choisissez un P3 valide/piquable pour un semencement direct.' });
+      }
+      p3Code = String(selectedP3.p3_code || `P3-${sourcePetriId}`);
+      sourceParentIsoId = Number(selectedP3.parent_iso_id || 0);
+    } else {
+      sourceGrainUnitId = Number(b.source_grain_unit_id || b.grain_source_unit_id || 0) || null;
+      if (!sourceGrainUnitId) {
+        return res.status(400).json({ error: 'Selectionnez un pot/sac grain source.' });
+      }
+      const sourceResult = await realPool.query(`
+        SELECT u.*, b.parent_iso_id AS batch_parent_iso_id, b.parent_iso_code AS batch_parent_iso_code,
+               COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id) AS resolved_source_petri_id,
+               COALESCE(u.p3_code, b.p3_code,
+                 CASE
+                   WHEN sp.id IS NOT NULL THEN COALESCE(b.parent_iso_code, ll.parent_iso_code, 'ISO') || '-P3-' || sp.id::text
+                   WHEN COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id) IS NOT NULL THEN 'P3-' || COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id)::text
+                   ELSE NULL
+                 END
+               ) AS resolved_p3_code
+        FROM myc_grain_units u
+        JOIN myc_grain_batches b ON b.id=u.batch_id
+        LEFT JOIN lc_lots ll ON ll.id=COALESCE(u.lc_lot_id,b.lc_lot_id)
+        LEFT JOIN iso_petris sp ON sp.id=COALESCE(u.source_petri_id,b.source_petri_id,ll.source_petri_id)
+        WHERE u.id=$1
+        LIMIT 1
+      `,[sourceGrainUnitId]);
+      selectedSourceGrain = sourceResult.rows[0] || null;
+      if (!selectedSourceGrain) {
+        return res.status(400).json({ error: 'Pot/sac grain source introuvable.' });
+      }
+      const sourceStatus = String(selectedSourceGrain.statut || '').toUpperCase();
+      const sourceUsable = sourceStatus === 'PRET' || !!selectedSourceGrain.storage_at || ['STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(sourceStatus);
+      if (!sourceUsable) {
+        return res.status(400).json({ error: 'Le grain source doit etre PRET ou stocke avant un transfert grain vers grain.' });
+      }
+      sourceGrainUnitCode = String(selectedSourceGrain.code || `GRAIN-${sourceGrainUnitId}`);
+      sourcePetriId = Number(selectedSourceGrain.resolved_source_petri_id || 0);
+      p3Code = String(selectedSourceGrain.resolved_p3_code || (sourcePetriId ? `P3-${sourcePetriId}` : ''));
+      sourceParentIsoId = Number(selectedSourceGrain.batch_parent_iso_id || 0);
+      const requestedP3Id = Number(b.source_petri_id || b.p3_id || 0);
+      if (!sourcePetriId) {
+        return res.status(400).json({ error: 'Le grain source ne possede pas de tracabilite P3 exploitable.' });
+      }
+      if (requestedP3Id && requestedP3Id !== sourcePetriId) {
+        return res.status(400).json({ error: 'Le grain source ne provient pas du P3 choisi.' });
+      }
+    }
 
     let unitIds = Array.isArray(b.unit_ids) ? b.unit_ids.map(Number).filter(Boolean) : [];
     const batchId = Number(b.batch_id || 0);
     const nbUnits = Number(b.nb_units || unitIds.length || 0);
-    const vol = Number(b.inoculation_volume_ml || b.vol_lc_par_sac_ml || 0);
+    const vol = sourceType === 'LC' ? Number(b.inoculation_volume_ml || b.vol_lc_par_sac_ml || 0) : null;
     const dateInoc = String(b.date_inoculation || new Date().toISOString().slice(0,10)).slice(0,10);
     const dateInocDateTimeRaw = String(b.date_inoculation_datetime || '').trim();
     const dateInocDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(dateInocDateTimeRaw)
       ? dateInocDateTimeRaw
       : `${dateInoc}T${String(new Date().getHours()).padStart(2,'0')}:${String(new Date().getMinutes()).padStart(2,'0')}:00`;
-    if (!vol || vol <= 0) return res.status(400).json({ error: 'Volume LC par pot/sac obligatoire.' });
+    if (sourceType === 'LC' && (!vol || vol <= 0)) {
+      return res.status(400).json({ error: 'Volume LC par pot/sac obligatoire.' });
+    }
 
     await client.query('BEGIN');
 
@@ -6264,7 +6440,7 @@ app.post('/api/grain-inoculations', async (req, res) => {
     }
 
     const units = await client.query(`
-      SELECT u.*, b.id AS b_id
+      SELECT u.*, b.id AS b_id, b.parent_iso_id AS batch_parent_iso_id
       FROM myc_grain_units u
       JOIN myc_grain_batches b ON b.id=u.batch_id
       WHERE u.id = ANY($1)
@@ -6275,26 +6451,40 @@ app.post('/api/grain-inoculations', async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Certains pots/sacs sont introuvables.' });
     }
+    if (sourceType === 'GRAIN' && unitIds.includes(Number(sourceGrainUnitId))) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Le pot/sac grain source ne peut pas etre ensemence par lui-meme.' });
+    }
     const unavailable = units.rows.filter(u => String(u.statut).toUpperCase() !== 'PREPARE');
     if (unavailable.length) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Certains pots/sacs sont deja ensemences ou non disponibles.' });
+    }
+    const wrongIsolation = sourceParentIsoId
+      ? units.rows.filter(u => Number(u.batch_parent_iso_id || 0) !== sourceParentIsoId)
+      : [];
+    if (wrongIsolation.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: "La source d'inoculation ne correspond pas a l'isolation des pots/sacs selectionnes." });
     }
 
     const mainBatchId = Number(units.rows[0].batch_id);
     const code = grainInocCode();
     await client.query(`
       INSERT INTO myc_grain_inoculations
-        (code, lc_lot_id, lc_pot_id, lc_code, lc_pot_code, source_petri_id, p3_code, batch_id, unit_ids, nb_units, inoculation_volume_ml, date_inoculation, notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        (code, inoculation_source_type, source_grain_unit_id, source_grain_unit_code, lc_lot_id, lc_pot_id, lc_code, lc_pot_code, source_petri_id, p3_code, batch_id, unit_ids, nb_units, inoculation_volume_ml, date_inoculation, notes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
     `, [
       code,
-      selectedLc.lc_lot_id,
-      selectedLc.lc_pot_id,
-      selectedLc.lc_code,
-      selectedLc.lc_pot_code,
-      selectedLc.source_petri_id || null,
-      selectedLc.p3_code || null,
+      sourceType,
+      sourceGrainUnitId,
+      sourceGrainUnitCode,
+      lcLotId,
+      lcPotId,
+      lcCode,
+      lcPotCode,
+      sourcePetriId || null,
+      p3Code || null,
       mainBatchId,
       JSON.stringify(unitIds),
       unitIds.length,
@@ -6306,17 +6496,20 @@ app.post('/api/grain-inoculations', async (req, res) => {
     await client.query(`
       UPDATE myc_grain_units
       SET statut='ENSEMENCE',
-          lc_lot_id=$2,
-          lc_pot_id=$3,
-          lc_code=$4,
-          lc_pot_code=$5,
-          source_petri_id=$6,
-          p3_code=$7,
-          inoculated_at=($8::timestamp AT TIME ZONE 'Africa/Tunis'),
-          inoculation_volume_ml=$9,
+          inoculation_source_type=$2,
+          source_grain_unit_id=$3,
+          source_grain_unit_code=$4,
+          lc_lot_id=$5,
+          lc_pot_id=$6,
+          lc_code=$7,
+          lc_pot_code=$8,
+          source_petri_id=$9,
+          p3_code=$10,
+          inoculated_at=($11::timestamp AT TIME ZONE 'Africa/Tunis'),
+          inoculation_volume_ml=$12,
           updated_at=now()
       WHERE id=ANY($1)
-    `, [unitIds, selectedLc.lc_lot_id, selectedLc.lc_pot_id, selectedLc.lc_code, selectedLc.lc_pot_code, selectedLc.source_petri_id || null, selectedLc.p3_code || null, dateInocDateTime, vol]);
+    `, [unitIds, sourceType, sourceGrainUnitId, sourceGrainUnitCode, lcLotId, lcPotId, lcCode, lcPotCode, sourcePetriId || null, p3Code || null, dateInocDateTime, vol]);
 
     await client.query(`
       UPDATE myc_grain_batches
@@ -6325,7 +6518,19 @@ app.post('/api/grain-inoculations', async (req, res) => {
     `, [mainBatchId]);
 
     await client.query('COMMIT');
-    res.status(201).json({ success: true, code, nb_units: unitIds.length, unit_ids: unitIds, lc_code: selectedLc.lc_code, lc_pot_code: selectedLc.lc_pot_code, source_petri_id: selectedLc.source_petri_id || null, p3_code: selectedLc.p3_code || null });
+    res.status(201).json({
+      success: true,
+      code,
+      nb_units: unitIds.length,
+      unit_ids: unitIds,
+      inoculation_source_type: sourceType,
+      source_grain_unit_id: sourceGrainUnitId,
+      source_grain_unit_code: sourceGrainUnitCode,
+      lc_code: lcCode,
+      lc_pot_code: lcPotCode,
+      source_petri_id: sourcePetriId || null,
+      p3_code: p3Code || null
+    });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('POST /api/grain-inoculations', e);
@@ -6339,7 +6544,8 @@ app.get('/api/spawn-lots', async (req, res) => {
   try {
     await ensureGrainWorkflowSchema();
     const r = await pool.query(`
-      SELECT i.id, i.code, i.lc_lot_id, i.lc_code AS lc_lot_code,
+      SELECT i.id, i.code, i.inoculation_source_type, i.source_grain_unit_id, i.source_grain_unit_code, i.lc_lot_id, i.lc_code AS lc_lot_code,
+             i.source_petri_id, i.p3_code,
              i.batch_id AS grain_lot_id, b.code AS grain_lot_code,
              i.nb_units AS nb_sacs, i.inoculation_volume_ml AS vol_lc_par_sac_ml,
              'EN_INCUBATION' AS statut, i.created_at
