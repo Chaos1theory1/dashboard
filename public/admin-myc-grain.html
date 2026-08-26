@@ -49,18 +49,50 @@
     .protocol-card{background:#fff;border:1px solid #e5e5e5;border-left:5px solid var(--purple);border-radius:12px;padding:14px;margin-bottom:12px}.protocol-card h5{font-size:15px;font-weight:900;color:#4b2b83;margin:0 0 8px}.protocol-card p{font-size:13px;margin:0 0 8px;color:#555}.loading{text-align:center;padding:35px;color:#777;font-weight:800}
     @media(max-width:991.98px){.admin-userbar{margin:10px 0 0 0;justify-content:center}}@media(max-width:767.98px){.admin-card{padding:16px}.admin-menu-bar a{display:inline-block;margin:6px}.btn-row{display:block}.btn-row .btn-action,.btn-row .btn-main{width:100%;margin-bottom:8px}.images-grid{grid-template-columns:1fr}.choice-row{display:block}.choice-card{width:100%;margin-bottom:8px}}
   
-    .grain-history-wrap{max-width:100%;overflow-x:hidden}
-    .grain-history-table{width:100%;table-layout:fixed;font-size:11px}
-    .grain-history-table th,.grain-history-table td{padding:7px 6px!important;vertical-align:middle!important;overflow-wrap:anywhere;word-break:break-word}
-    .grain-history-table th{font-size:10px!important}
-    .grain-history-table .grain-group-start td{border-top:3px solid var(--green)!important}
-    .grain-history-table .grain-source-cell{background:#f8fff9!important;font-size:11px;line-height:1.35;min-width:0!important;border-left:3px solid var(--green)!important}
-    .grain-history-table .grain-row-actions{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
-    .grain-history-table .grain-row-actions .btn-main{height:auto!important;min-height:28px!important;padding:5px 7px!important;font-size:10px!important;border-radius:7px!important;white-space:nowrap!important}
-    .grain-history-table .badge-pill{font-size:10px;padding:4px 7px}
-    .grain-history-table .grain-unit-indent{padding-left:10px!important;border-left:4px solid var(--green)!important}
-    .grain-history-table .grain-small{font-size:10px!important;line-height:1.3!important}
-    .grain-history-table .grain-unit-code{font-size:11px!important}
+    /* === HISTORIQUE GRAIN COMPACT === */
+    .grain-history-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+    .grain-history-search{position:relative;flex:1 1 300px;max-width:430px}
+    .grain-history-search input{width:100%;height:40px!important;margin:0!important;padding:8px 12px 8px 36px!important;border:1px solid #d8e1db!important;border-radius:10px!important;background:#fff!important;font-size:12px!important}
+    .grain-history-search:before{content:'⌕';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:19px;color:#6d7b72;pointer-events:none}
+    .grain-history-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+    .grain-history-chip{border:1px solid #d8e1db;background:#fff;color:#4c5c52;border-radius:999px;padding:7px 10px;font-size:10px;font-weight:900;cursor:pointer;white-space:nowrap}
+    .grain-history-chip:hover{border-color:var(--green);color:var(--green-dark)}
+    .grain-history-chip.active{background:#eaf8ef;border-color:#92d5a8;color:var(--green-dark)}
+    .grain-history-pagesize{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:10px;color:#667085;font-weight:800}
+    .grain-history-pagesize select{width:auto!important;height:36px!important;margin:0!important;padding:5px 28px 5px 8px!important;font-size:11px!important;border-radius:8px!important}
+    .grain-history-wrap{max-width:100%;max-height:620px;overflow:auto;border:1px solid #e1e8e3;border-radius:10px;background:#fff}
+    .grain-history-table{width:100%;min-width:980px;table-layout:fixed;font-size:11px;margin:0!important}
+    .grain-history-table thead th{position:sticky;top:0;z-index:12;background:#f4f8f5!important;box-shadow:0 1px 0 #dce6df}
+    .grain-history-table th,.grain-history-table td{padding:8px 8px!important;vertical-align:middle!important;overflow-wrap:anywhere;word-break:normal}
+    .grain-history-table th{font-size:9px!important;letter-spacing:.045em;text-transform:uppercase}
+    .grain-history-table .grain-unit-row-line td{height:50px;background:#fff!important;border-top:1px solid #edf1ee!important}
+    .grain-history-table .grain-unit-row-line:hover td{background:#fbfefc!important}
+    .grain-history-table .grain-unit-code{font-size:10px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:calc(100% - 26px);vertical-align:middle}
+    .grain-history-table .grain-small{font-size:9px!important;line-height:1.25!important;color:#718078}
+    .grain-history-table .badge-pill{font-size:9px;padding:4px 7px;white-space:nowrap}
+    .grain-history-toggle{width:22px;height:22px;border:0;background:#eef6f0;border-radius:6px;color:var(--green-dark);font-weight:900;cursor:pointer;margin-right:4px;vertical-align:middle;line-height:22px;padding:0}
+    .grain-history-detail-row{display:none}
+    .grain-history-detail-row.open{display:table-row}
+    .grain-history-detail-row td{background:#f8fbf9!important;border-top:0!important;border-bottom:2px solid #dce9df!important;padding:12px 14px!important}
+    .grain-history-detail-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:9px 14px}
+    .grain-history-detail-item{min-width:0}
+    .grain-history-detail-label{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#7a8980;font-weight:900;margin-bottom:3px}
+    .grain-history-detail-value{font-size:11px;color:#26362c;font-weight:800;word-break:break-word}
+    .grain-actions-menu{position:relative;display:inline-block}
+    .grain-actions-menu summary{list-style:none;width:31px;height:29px;border:1px solid #d6dfd9;background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;font-weight:900;color:#4d5b52;user-select:none}
+    .grain-actions-menu summary::-webkit-details-marker{display:none}
+    .grain-actions-menu[open] summary{border-color:#9bcbaa;background:#f0faf3;color:var(--green-dark)}
+    .grain-actions-popover{position:absolute;right:0;top:35px;z-index:40;min-width:150px;background:#fff;border:1px solid #dbe3de;border-radius:10px;box-shadow:0 12px 30px rgba(20,45,28,.16);padding:6px}
+    .grain-actions-popover button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:8px 9px;border-radius:7px;font-size:11px;font-weight:800;color:#35433a;cursor:pointer}
+    .grain-actions-popover button:hover{background:#f1f7f3}
+    .grain-actions-popover button.danger{color:#b42318}
+    .grain-history-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .grain-history-pagination-info{font-size:11px;color:#667085;font-weight:700}
+    .grain-history-pagination-nav{display:flex;align-items:center;gap:7px}
+    .grain-history-pagination-nav .btn-main{min-width:102px!important;padding:7px 10px!important;font-size:10px!important}
+    .grain-history-page-status{font-size:11px;font-weight:900;color:var(--green-dark);min-width:100px;text-align:center}
+    @media(max-width:900px){.grain-history-detail-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.grain-history-pagesize{margin-left:0}}
+    @media(max-width:600px){.grain-history-toolbar{align-items:stretch}.grain-history-search{max-width:none}.grain-history-chips{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.grain-history-detail-grid{grid-template-columns:1fr}.grain-history-wrap{max-height:560px}}
 
     /* === GRAIN UI: sections pleine largeur + pagination + filtre statut === */
     .grain-wide-section{margin-left:0!important;margin-right:0!important}
@@ -303,7 +335,17 @@
         <div class="col-lg-12">
           <div class="admin-card">
             <h4>📋 Historique des lots de semencement grain</h4>
-            <div class="table-responsive grain-history-wrap"><table class="lots-table grain-history-table"><colgroup><col style="width:20%"><col style="width:11%"><col style="width:17%"><col style="width:6%"><col style="width:10%"><col style="width:7%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup><thead><tr><th>Pot/sac</th><th>Date semencement</th><th>Source mycélium</th><th>Grain</th><th>Type / capacité</th><th>Jour</th><th>Propagation</th><th class="grain-status-head"><div class="grain-status-filter-wrap" id="grain-status-filter-wrap"><button type="button" class="grain-status-filter-toggle" id="grain-status-filter-toggle" onclick="toggleGrainStatusFilter(event)">Statut <span>▾</span></button><select id="grain-status-filter" class="grain-status-filter" onchange="applyGrainStatusFilter(this.value)" onclick="event.stopPropagation()"><option value="ALL">Tous les statuts</option></select></div></th><th>Actions</th></tr></thead><tbody id="units-table-body"><tr><td colspan="9" class="text-center">Chargement...</td></tr></tbody></table></div>
+            <p class="admin-card-subtitle">Vue compacte : recherchez un lot, filtrez par statut et ouvrez une ligne uniquement quand vous avez besoin du détail.</p>
+            <div class="grain-history-toolbar">
+              <div class="grain-history-search"><input id="grain-history-search" type="search" placeholder="Rechercher lot, source, grain, P3, LC..." oninput="applyGrainHistorySearch(this.value)"></div>
+              <div class="grain-history-chips" id="grain-history-chips"></div>
+              <div class="grain-history-pagesize"><span>Lignes</span><select id="grain-history-page-size" onchange="changeGrainHistoryPageSize(this.value)"><option value="25" selected>25</option><option value="50">50</option><option value="100">100</option></select></div>
+            </div>
+            <div class="table-responsive grain-history-wrap" id="grain-history-scroll"><table class="lots-table grain-history-table"><colgroup><col style="width:24%"><col style="width:12%"><col style="width:20%"><col style="width:13%"><col style="width:7%"><col style="width:10%"><col style="width:9%"><col style="width:5%"></colgroup><thead><tr><th>Lot</th><th>Date</th><th>Source</th><th>Type / capacité</th><th>Jour</th><th>Propagation</th><th>Statut</th><th></th></tr></thead><tbody id="units-table-body"><tr><td colspan="8" class="text-center">Chargement...</td></tr></tbody></table></div>
+            <div class="grain-history-pagination" id="grain-history-pagination">
+              <div class="grain-history-pagination-info" id="grain-history-count">0 lot</div>
+              <div class="grain-history-pagination-nav"><button type="button" class="btn-main btn-grey" id="grain-history-prev" onclick="changeGrainHistoryPage(-1)">← Précédent</button><span class="grain-history-page-status" id="grain-history-page-status">Page 1 / 1</span><button type="button" class="btn-main btn-green" id="grain-history-next" onclick="changeGrainHistoryPage(1)">Suivant →</button></div>
+            </div>
           </div>
         </div>
       </div>
@@ -381,6 +423,9 @@
     let grainBatchPage = 1;
     const GRAIN_BATCH_PAGE_SIZE = 10;
     let grainStatusFilter = 'ALL';
+    let grainHistorySearch = '';
+    let grainHistoryPage = 1;
+    let grainHistoryPageSize = 25;
 
     const $ = (id) => document.getElementById(id);
     function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
@@ -428,6 +473,12 @@
       if(type==='GRAIN')return `<strong>Grain : ${esc(u.source_grain_unit_code||'—')}</strong><br><span class="grain-small">Transfert grain → grain</span><br><span class="grain-small">P3 : ${esc(p3Label(u))}</span>`;
       if(type==='P3')return `<strong>P3 direct : ${esc(p3Label(u))}</strong><br><span class="grain-small">Source : gélose / mycélium du P3</span>`;
       return `<strong>LC : ${esc(lcCodeOf(u))}</strong><br><span class="grain-small">Pot LC : ${esc(lcPotShortOf(u))}</span><br><span class="grain-small">P3 : ${esc(p3Label(u))}</span>`;
+    }
+    function sourceMyceliumCompactHtml(u){
+      const type=inoculationSourceTypeOf(u);
+      if(type==='GRAIN')return `<strong>Grain · ${esc(u.source_grain_unit_code||'—')}</strong><div class="grain-small">P3 · ${esc(p3Label(u))}</div>`;
+      if(type==='P3')return `<strong>P3 direct · ${esc(p3Label(u))}</strong><div class="grain-small">Gélose / mycélium P3</div>`;
+      return `<strong>LC · ${esc(lcCodeOf(u))}</strong><div class="grain-small">${esc(lcPotShortOf(u))} · P3 ${esc(p3Label(u))}</div>`;
     }
     function typeCapacityHtml(u){return `${esc(u?.container_type||'—')}<br><span class="grain-small">Capacité ${esc(capKg(u?.capacity_final_kg))}</span>`;}
     function uniqueList(list,fn){const out=[];list.forEach(x=>{const v=String(fn(x)||'').trim();if(v&&!out.includes(v))out.push(v);});return out;}
@@ -852,48 +903,113 @@
     };
     window.applyGrainStatusFilter=function(value){
       grainStatusFilter=value==='ALL'?'ALL':canonicalGrainStatus(value);
+      grainHistoryPage=1;
       $('grain-status-filter-wrap')?.classList.remove('open');
       syncGrainStatusFilterOptions();
       renderUnits();
     };
 
+    function grainHistorySearchText(u){
+      return normalizeText([
+        u?.code,u?.container_type,u?.type_grain,u?.statut,
+        u?.source_grain_unit_code,lcCodeOf(u),lcPotShortOf(u),p3Label(u),
+        u?.batch_code,u?.parent_iso_code
+      ].filter(Boolean).join(' '));
+    }
+    function renderGrainHistoryChips(){
+      const box=$('grain-history-chips');
+      if(!box)return;
+      const options=[['ALL','Tous'],...GRAIN_STATUS_OPTIONS];
+      box.innerHTML=options.map(([value,label])=>`<button type="button" class="grain-history-chip${grainStatusFilter===value?' active':''}" onclick="applyGrainStatusFilter('${esc(value)}')">${esc(label)}</button>`).join('');
+    }
+    window.applyGrainHistorySearch=function(value){
+      grainHistorySearch=String(value||'').trim();
+      grainHistoryPage=1;
+      renderUnits();
+    };
+    window.changeGrainHistoryPageSize=function(value){
+      const n=Number(value||25);
+      grainHistoryPageSize=[25,50,100].includes(n)?n:25;
+      grainHistoryPage=1;
+      renderUnits();
+    };
+    window.changeGrainHistoryPage=function(direction){
+      const rows=getFilteredGrainHistoryRows();
+      const totalPages=Math.max(1,Math.ceil(rows.length/grainHistoryPageSize));
+      grainHistoryPage=Math.min(totalPages,Math.max(1,grainHistoryPage+Number(direction||0)));
+      renderUnits();
+      $('grain-history-scroll')?.scrollTo({top:0,behavior:'smooth'});
+    };
+    window.toggleGrainUnitDetails=function(id){
+      const row=$(`grain-history-detail-${Number(id)}`);
+      const btn=$(`grain-history-toggle-${Number(id)}`);
+      if(!row)return;
+      const open=row.classList.toggle('open');
+      if(btn)btn.textContent=open?'−':'+';
+    };
+    function getFilteredGrainHistoryRows(){
+      const q=normalizeText(grainHistorySearch);
+      return filteredUnits()
+        .filter(isInoculatedUnit)
+        .filter(u=>grainStatusFilter==='ALL'||canonicalGrainStatus(u.statut)===grainStatusFilter)
+        .filter(u=>!q||grainHistorySearchText(u).includes(q))
+        .sort((a,b)=>new Date(semisGroupDate(b)||b.created_at||0)-new Date(semisGroupDate(a)||a.created_at||0)||Number(b.id)-Number(a.id));
+    }
     function renderUnits(){
       const body=$('units-table-body');
       syncGrainStatusFilterOptions();
-      const inoc=filteredUnits().filter(isInoculatedUnit).filter(u=>grainStatusFilter==='ALL'||canonicalGrainStatus(u.statut)===grainStatusFilter);
-      if(!inoc.length){body.innerHTML=`<tr><td colspan="9" class="text-center">${grainStatusFilter==='ALL'?'Aucun pot/sac ensemencé pour le moment':'Aucun pot/sac avec le statut '+esc(grainStatusLabel(grainStatusFilter))}</td></tr>`;return;}
+      renderGrainHistoryChips();
+      const rows=getFilteredGrainHistoryRows();
+      const totalPages=Math.max(1,Math.ceil(rows.length/grainHistoryPageSize));
+      if(grainHistoryPage>totalPages)grainHistoryPage=totalPages;
+      if(grainHistoryPage<1)grainHistoryPage=1;
+      const start=(grainHistoryPage-1)*grainHistoryPageSize;
+      const pageRows=rows.slice(start,start+grainHistoryPageSize);
 
-      // Regroupement uniquement par source mycélium : même LC / même pot LC / même P3.
-      // On n'ajoute plus de ligne résumé : le groupe est séparé visuellement et la source est affichée une seule fois.
-      const grouped=new Map();
-      inoc.forEach(u=>{
-        const k=unitLcGroupKey(u);
-        if(!grouped.has(k))grouped.set(k,[]);
-        grouped.get(k).push(u);
-      });
-      let groups=Array.from(grouped.entries()).map(([key,list])=>({
-        key,
-        list,
-        date:Math.max(...list.map(u=>new Date(semisGroupDate(u)||0).getTime()).filter(Number.isFinite))
-      }));
-      groups.sort((a,b)=>(b.date||0)-(a.date||0));
-
-      let html='';
-      groups.forEach(g=>{
-        const list=g.list;
-        list.sort((a,b)=>new Date(semisGroupDate(a)||a.created_at||0)-new Date(semisGroupDate(b)||b.created_at||0)||Number(a.unit_number||0)-Number(b.unit_number||0)||Number(a.id)-Number(b.id));
-        const first=list[0]||{};
-        const rowSpan=list.length;
-
-        list.forEach((u,idx)=>{
-          const stockBtn=isUnitStored(u)?`<button class="btn-main btn-grey" type="button" onclick="openSummaryForUnit(${Number(u.id)})">Résumé</button>`:`<button class="btn-main btn-brown" type="button" onclick="stockUnit(${Number(u.id)})">Stockage</button>`;
+      if(!rows.length){
+        body.innerHTML=`<tr><td colspan="8" class="text-center">${grainHistorySearch?'Aucun lot ne correspond à la recherche':grainStatusFilter==='ALL'?'Aucun pot/sac ensemencé pour le moment':'Aucun pot/sac avec le statut '+esc(grainStatusLabel(grainStatusFilter))}</td></tr>`;
+      }else{
+        body.innerHTML=pageRows.map(u=>{
+          const id=Number(u.id);
           const jour=u.last_day_index!=null?'J'+esc(u.last_day_index):'J0';
-          const groupStart=idx===0?' grain-group-start':'';
-          const sourceCell=idx===0?`<td rowspan="${rowSpan}" class="grain-source-cell">${sourceMyceliumHtml(first)}</td>`:'';
-          html+=`<tr class="grain-unit-row-line${groupStart}"><td class="grain-unit-indent"><span class="grain-unit-code">↳ ${esc(u.code)}</span><div class="grain-small">${esc(u.container_type||'—')} n°${esc(u.unit_number||'—')}</div></td><td>${esc(fmtDateTime(semisGroupDate(u)))}</td>${sourceCell}<td>${esc(u.type_grain||'Blé')}</td><td>${typeCapacityHtml(u)}</td><td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td><td>${u.last_propagation_pct!=null?esc(u.last_propagation_pct)+' %':'—'}<br><span class="grain-small">${u.last_score20!=null?'score '+esc(u.last_score20)+'/20':''}</span></td><td>${statusBadge(u.statut)}</td><td><div class="grain-row-actions"><button class="btn-main btn-orange" type="button" onclick="openJournalForUnit(${Number(u.id)})">Journal</button>${stockBtn}<button class="btn-main btn-blue" type="button" onclick="printGrainUnitLabelsById(${Number(u.id)})">🏷️ Étiquette</button>${['admin','operator'].includes(String(window.currentAdminRole||'').toLowerCase())?`<button class="btn-main btn-red" type="button" onclick="deleteGrainUnit(${Number(u.id)})">🗑️ Supprimer</button>`:''}</div></td></tr>`;
-        });
-      });
-      body.innerHTML=html;
+          const propagation=u.last_propagation_pct!=null?esc(u.last_propagation_pct)+' %':'—';
+          const score=u.last_score20!=null?'score '+esc(u.last_score20)+'/20':'';
+          const stockAction=isUnitStored(u)
+            ?`<button type="button" onclick="event.stopPropagation();openSummaryForUnit(${id});this.closest('details').removeAttribute('open')">📦 Résumé</button>`
+            :`<button type="button" onclick="event.stopPropagation();stockUnit(${id});this.closest('details').removeAttribute('open')">📦 Stockage</button>`;
+          const deleteAction=['admin','operator'].includes(String(window.currentAdminRole||'').toLowerCase())
+            ?`<button type="button" class="danger" onclick="event.stopPropagation();deleteGrainUnit(${id});this.closest('details').removeAttribute('open')">🗑️ Supprimer</button>`:'';
+          return `<tr class="grain-unit-row-line">
+            <td><button type="button" class="grain-history-toggle" id="grain-history-toggle-${id}" onclick="toggleGrainUnitDetails(${id})">+</button><span class="grain-unit-code" title="${esc(u.code)}">${esc(u.code)}</span><div class="grain-small" style="padding-left:30px">${esc(u.container_type||'—')} n°${esc(u.unit_number||'—')}</div></td>
+            <td>${esc(fmtDateTime(semisGroupDate(u)))}</td>
+            <td>${sourceMyceliumCompactHtml(u)}</td>
+            <td><strong>${esc(u.container_type||'—')} · ${esc(capKg(u.capacity_final_kg))}</strong><div class="grain-small">${esc(u.type_grain||'Blé')}</div></td>
+            <td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td>
+            <td><strong>${propagation}</strong><div class="grain-small">${score}</div></td>
+            <td>${statusBadge(u.statut)}</td>
+            <td style="overflow:visible"><details class="grain-actions-menu" onclick="event.stopPropagation()"><summary aria-label="Actions">⋯</summary><div class="grain-actions-popover"><button type="button" onclick="openJournalForUnit(${id});this.closest('details').removeAttribute('open')">📒 Journal</button>${stockAction}<button type="button" onclick="printGrainUnitLabelsById(${id});this.closest('details').removeAttribute('open')">🏷️ Étiquette</button>${deleteAction}</div></details></td>
+          </tr>
+          <tr class="grain-history-detail-row" id="grain-history-detail-${id}"><td colspan="8"><div class="grain-history-detail-grid">
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Lot complet</div><div class="grain-history-detail-value">${esc(u.code)}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Source mycélium</div><div class="grain-history-detail-value">${sourceMyceliumHtml(u)}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Contenant / capacité</div><div class="grain-history-detail-value">${esc(u.container_type||'—')} n°${esc(u.unit_number||'—')} · ${esc(capKg(u.capacity_final_kg))}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Type de grain</div><div class="grain-history-detail-value">${esc(u.type_grain||'Blé')}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Semencement</div><div class="grain-history-detail-value">${esc(fmtDateTime(semisGroupDate(u)))}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Dernier suivi</div><div class="grain-history-detail-value">${u.last_treated_at?esc(fmtDateTime(u.last_treated_at)):'Non suivi'}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Propagation</div><div class="grain-history-detail-value">${propagation}${score?' · '+score:''}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Statut</div><div class="grain-history-detail-value">${statusBadge(u.statut)}</div></div>
+          </div></td></tr>`;
+        }).join('');
+      }
+
+      const count=$('grain-history-count');
+      const status=$('grain-history-page-status');
+      const prev=$('grain-history-prev');
+      const next=$('grain-history-next');
+      if(count)count.textContent=rows.length?`${start+1}–${Math.min(start+grainHistoryPageSize,rows.length)} sur ${rows.length} lot${rows.length>1?'s':''}`:'0 lot';
+      if(status)status.textContent=`Page ${grainHistoryPage} / ${totalPages}`;
+      if(prev)prev.disabled=grainHistoryPage<=1||!rows.length;
+      if(next)next.disabled=grainHistoryPage>=totalPages||!rows.length;
     }
 
     function renderPreparedUnits(){
@@ -1093,7 +1209,7 @@
       $('btn-show-seed')?.addEventListener('click',()=>{showPanel('panel-seed');updateSeedSourceMode();renderPreparedUnits();});
       $('btn-show-protocol')?.addEventListener('click',()=>showPanel('panel-protocol'));
       $('btn-print-selected-labels')?.addEventListener('click',printCurrentGrainLabels);
-      $('isolation-select')?.addEventListener('change',()=>{selectedIsolationId=Number($('isolation-select').value||0);selectedP3Id=0;grainBatchPage=1;['main-lc-select','create-lc-select','seed-lc-select'].forEach(id=>{const el=$(id);if(el)el.value='';});syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();updateSeedSourceMode();});
+      $('isolation-select')?.addEventListener('change',()=>{selectedIsolationId=Number($('isolation-select').value||0);selectedP3Id=0;grainBatchPage=1;grainHistoryPage=1;['main-lc-select','create-lc-select','seed-lc-select'].forEach(id=>{const el=$(id);if(el)el.value='';});syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();updateSeedSourceMode();});
       $('main-lc-select')?.addEventListener('change',()=>{const v=$('main-lc-select').value;if($('create-lc-select'))$('create-lc-select').value=v;if($('seed-lc-select'))$('seed-lc-select').value=v;updateLcActionState();renderValidLcs();});
       $('container-sac').addEventListener('change',()=>syncContainerChoice('SAC'));
       $('container-pot').addEventListener('change',()=>syncContainerChoice('POT'));
