@@ -920,9 +920,14 @@ router.put('/strains/:id', async (req, res) => {
     }
 
     const current = existingStrain.rows[0];
+    // Option A: certificate_available means that a certificate is associated
+    // with the strain, regardless of whether it is INTERNAL or EXTERNAL.
+    // For INTERNAL strains, certification is performed by the dedicated
+    // /api/strains/:id/certify workflow, so normal edits must preserve the
+    // certificate flag instead of resetting it to false.
     const certificateAvailable = current.strain_type === 'EXTERNAL'
       ? Boolean(sourceRef)
-      : false;
+      : Boolean(current.certificate_available);
 
     const result = await req.db.query(
       `UPDATE strains SET
