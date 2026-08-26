@@ -421,7 +421,7 @@
     function selectedP3Code(){const p=selectedP3Record();return p?`${p.iso_code||'ISO'}-P3-${Number(p.petri_id)}`:(selectedP3()?`P3-${selectedP3()}`:'—');}
     function seedSourceType(){if($('seed-source-grain')?.checked)return 'GRAIN';return $('seed-source-p3')?.checked?'P3':'LC';}
     function selectedSourceGrain(){const id=Number($('seed-grain-source-select')?.value||0);return units.find(u=>Number(u.id)===id)||null;}
-    function isEligibleGrainSource(u){const st=String(u?.statut||'').toUpperCase();return !!u?.inoculated_at && (st==='PRET'||isUnitStored(u));}
+    function isEligibleGrainSource(u){const st=canonicalGrainStatus(u?.statut);return !!u?.inoculated_at && (st==='PRET'||isUnitStored(u));}
     function eligibleGrainSources(){const iso=selectedIsolation(),p3=selectedP3();return units.filter(u=>isEligibleGrainSource(u)&&(!iso||isoIdFromAny(u)===iso)&&(!p3||Number(u.source_petri_id||0)===p3));}
     function sourceMyceliumHtml(u){
       const type=inoculationSourceTypeOf(u);
@@ -431,7 +431,7 @@
     }
     function typeCapacityHtml(u){return `${esc(u?.container_type||'—')}<br><span class="grain-small">Capacité ${esc(capKg(u?.capacity_final_kg))}</span>`;}
     function uniqueList(list,fn){const out=[];list.forEach(x=>{const v=String(fn(x)||'').trim();if(v&&!out.includes(v))out.push(v);});return out;}
-    function groupStatus(list){const vals=uniqueList(list,u=>String(u.statut||'').toUpperCase());return vals.length===1?vals[0]:'MIXTE';}
+    function groupStatus(list){const vals=uniqueList(list,u=>canonicalGrainStatus(u.statut));return vals.length===1?vals[0]:'MIXTE';}
     function unitLcGroupKey(u){
       // Regrouper par source biologique réelle : soit même pot LC, soit même P3 utilisé directement.
       const type=inoculationSourceTypeOf(u);
@@ -442,7 +442,12 @@
     function semisGroupDate(u){return u?.inoculation_created_at||u?.inoculated_at||u?.date_inoculation||u?.seeded_at||'';}
     function lcKey(lc){return `${lc.lc_lot_id}|${lc.lc_pot_id || ''}`}
     function selectedLcFromSelect(id){const val=$(id)?.value||'';return validLcs.find(l=>lcKey(l)===val)||null}
-    function statusBadge(st){st=String(st||'').toUpperCase(); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK')return '<span class="badge-pill ok">Stock</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
+    function canonicalGrainStatus(st){
+      const key=String(st||'').trim().toUpperCase();
+      if(['EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(key))return 'STOCK';
+      return key;
+    }
+    function statusBadge(st){st=canonicalGrainStatus(st); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='PARTIELLEMENT_ENSEMENCE')return '<span class="badge-pill warn">Partiellement ensemencé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK')return '<span class="badge-pill ok">Stocké</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; if(st==='SUPPRIME')return '<span class="badge-pill muted">Supprimé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
     function apiErrorMessage(e){return e && e.message ? e.message : 'Erreur API inconnue'}
     async function parseApiResponse(r,path){
       const text=await r.text();
@@ -560,7 +565,7 @@
       return Array.from(map.values()).sort((a,b)=>String(a.code).localeCompare(String(b.code)));
     }
 
-    function isUnitStored(u){const st=String(u?.statut||u?.status||'').toUpperCase();return !!(u?.storage_at||st==='STOCK');}
+    function isUnitStored(u){const st=canonicalGrainStatus(u?.statut||u?.status);return !!(u?.storage_at||st==='STOCK');}
     function getGrainPublicBaseUrl(){let origin=window.location.origin;let host=window.location.hostname;let saved=localStorage.getItem('biotechagro_grain_public_base_url');if(saved&&/^https?:\/\//i.test(saved))return saved.replace(/\/$/,'');if(host==='localhost'||host==='127.0.0.1'){let suggested=origin.replace('localhost','192.168.1.26').replace('127.0.0.1','192.168.1.26');let value=prompt("Adresse du serveur à mettre dans les QR codes grain pour le téléphone.\n\nExemple : http://192.168.1.26:3000\n\nSi tu imprimes depuis localhost, le téléphone ne peut pas ouvrir localhost.",suggested);let clean=String(value||suggested).trim().replace(/\/$/,'');localStorage.setItem('biotechagro_grain_public_base_url',clean);return clean;}return origin.replace(/\/$/,'');}
     function resetGrainPublicBaseUrl(){localStorage.removeItem('biotechagro_grain_public_base_url');alert("Adresse QR grain réinitialisée. À la prochaine impression depuis localhost, le système redemandera l’adresse du serveur.");}
     function qrUrl(data){return 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data='+encodeURIComponent(data);}
@@ -653,7 +658,7 @@
       const el=$('seed-grain-source-select');if(!el)return;
       const old=Number(el.value||0);
       const rows=eligibleGrainSources();
-      el.innerHTML='<option value="">Sélectionner un grain prêt</option>'+rows.map(u=>`<option value="${Number(u.id)}">${esc(u.code||('Grain #'+u.id))} — ${esc(u.container_type||'—')} — ${esc(String(u.statut||''))}</option>`).join('');
+      el.innerHTML='<option value="">Sélectionner un grain prêt</option>'+rows.map(u=>`<option value="${Number(u.id)}">${esc(u.code||('Grain #'+u.id))} — ${esc(u.container_type||'—')} — ${esc(grainStatusLabel(canonicalGrainStatus(u.statut)))}</option>`).join('');
       if(old&&rows.some(u=>Number(u.id)===old))el.value=String(old);
     }
 
@@ -708,9 +713,9 @@
     function renderStats(){
       const list=filteredUnits();
       const lcs=filteredLcs();
-      const prepared=list.filter(u=>u.statut==='PREPARE').length;
-      const seeded=list.filter(u=>['ENSEMENCE','EN_INCUBATION'].includes(String(u.statut).toUpperCase())).length;
-      const ready=list.filter(u=>String(u.statut).toUpperCase()==='PRET').length;
+      const prepared=list.filter(u=>canonicalGrainStatus(u.statut)==='PREPARE').length;
+      const seeded=list.filter(u=>['ENSEMENCE','EN_INCUBATION'].includes(canonicalGrainStatus(u.statut))).length;
+      const ready=list.filter(u=>canonicalGrainStatus(u.statut)==='PRET').length;
       const stock=list.filter(isUnitStored).length;
       $('dashboard-stats').innerHTML=`<div class="info-item"><div class="info-label">LC validées</div><div class="info-value">${lcs.length}</div></div><div class="info-item"><div class="info-label">P3 validés</div><div class="info-value">${filteredP3s().length}</div></div><div class="info-item"><div class="info-label">Pots/sacs préparés</div><div class="info-value">${prepared}</div></div><div class="info-item"><div class="info-label">Ensemencés</div><div class="info-value">${seeded}</div></div><div class="info-item"><div class="info-label">Prêts</div><div class="info-value">${ready}</div></div><div class="info-item"><div class="info-label">Stock</div><div class="info-value">${stock}</div></div>`
     }
@@ -808,16 +813,16 @@
       $('grain-batch-pagination')?.scrollIntoView({behavior:'smooth',block:'nearest'});
     };
 
-    function isInoculatedUnit(u){return String(u?.statut||'').toUpperCase()!=='PREPARE'||!!u?.inoculated_at}
+    function isInoculatedUnit(u){return canonicalGrainStatus(u?.statut)!=='PREPARE'||!!u?.inoculated_at}
     const GRAIN_STATUS_OPTIONS=[
       ['ENSEMENCE','Ensemencé'],
       ['EN_INCUBATION','Incubation'],
       ['PRET','Prêt'],
-      ['STOCK','Stock'],
+      ['STOCK','Stocké'],
       ['CONTAMINE','Contaminé']
     ];
     function grainStatusLabel(value){
-      const key=String(value||'').toUpperCase();
+      const key=canonicalGrainStatus(value);
       const found=GRAIN_STATUS_OPTIONS.find(([v])=>v===key);
       return found?found[1]:(key||'—').replaceAll('_',' ');
     }
@@ -825,7 +830,7 @@
       const select=$('grain-status-filter');
       if(!select)return;
       const known=GRAIN_STATUS_OPTIONS.map(x=>x[0]);
-      const runtime=uniqueList(units,u=>String(u.statut||'').toUpperCase()).filter(v=>v&&v!=='PREPARE'&&!known.includes(v));
+      const runtime=uniqueList(units,u=>canonicalGrainStatus(u.statut)).filter(v=>v&&v!=='PREPARE'&&!known.includes(v));
       const options=[...GRAIN_STATUS_OPTIONS,...runtime.map(v=>[v,grainStatusLabel(v)])];
       select.innerHTML='<option value="ALL">Tous les statuts</option>'+options.map(([value,label])=>`<option value="${esc(value)}">${esc(label)} (${esc(value)})</option>`).join('');
       if(options.some(([value])=>value===grainStatusFilter))select.value=grainStatusFilter;else{grainStatusFilter='ALL';select.value='ALL';}
@@ -846,7 +851,7 @@
       }
     };
     window.applyGrainStatusFilter=function(value){
-      grainStatusFilter=String(value||'ALL').toUpperCase();
+      grainStatusFilter=value==='ALL'?'ALL':canonicalGrainStatus(value);
       $('grain-status-filter-wrap')?.classList.remove('open');
       syncGrainStatusFilterOptions();
       renderUnits();
@@ -855,7 +860,7 @@
     function renderUnits(){
       const body=$('units-table-body');
       syncGrainStatusFilterOptions();
-      const inoc=filteredUnits().filter(isInoculatedUnit).filter(u=>grainStatusFilter==='ALL'||String(u.statut||'').toUpperCase()===grainStatusFilter);
+      const inoc=filteredUnits().filter(isInoculatedUnit).filter(u=>grainStatusFilter==='ALL'||canonicalGrainStatus(u.statut)===grainStatusFilter);
       if(!inoc.length){body.innerHTML=`<tr><td colspan="9" class="text-center">${grainStatusFilter==='ALL'?'Aucun pot/sac ensemencé pour le moment':'Aucun pot/sac avec le statut '+esc(grainStatusLabel(grainStatusFilter))}</td></tr>`;return;}
 
       // Regroupement uniquement par source mycélium : même LC / même pot LC / même P3.
@@ -893,7 +898,7 @@
 
     function renderPreparedUnits(){
       const grid=$('prepared-units-grid');
-      const available=filteredUnits().filter(u=>String(u.statut).toUpperCase()==='PREPARE');
+      const available=filteredUnits().filter(u=>canonicalGrainStatus(u.statut)==='PREPARE');
       if(!available.length){grid.innerHTML='<div class="alert-box alert-orange">Aucun pot/sac préparé disponible pour cette isolation. Crée d’abord un pot ou sac de grain.</div>';updateSeedCounter();return;}
       grid.innerHTML=available.map(u=>`<div class="unit-card"><label class="unit-check"><input type="checkbox" class="seed-unit-check" value="${Number(u.id)}" onchange="updateSeedCounter()"><span><strong>${esc(u.code)}</strong><div class="small-line">Lot ${esc(u.batch_code)} · ${esc(u.container_type)} · ${Number(u.capacity_final_kg||0)} kg</div></span></label></div>`).join('');
       updateSeedCounter();

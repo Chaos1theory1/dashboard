@@ -2386,6 +2386,32 @@ async function loadGrainDeletionTarget(db, grainUnitId, lock = false) {
   return { grainUnitId: id, batchId: Number(found.rows[0].batch_id), row: found.rows[0] };
 }
 
+async function recomputeGrainBatchStatus(client, batchId) {
+  const counts = await client.query(`
+    SELECT COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE UPPER(BTRIM(COALESCE(statut,'')))='PREPARE')::int AS prepared,
+           COUNT(*) FILTER (WHERE UPPER(BTRIM(COALESCE(statut,'')))<>'PREPARE')::int AS inoculated
+    FROM myc_grain_units
+    WHERE batch_id=$1
+  `, [Number(batchId)]);
+  const c = counts.rows[0] || { total: 0, prepared: 0, inoculated: 0 };
+  const total = Number(c.total || 0);
+  const prepared = Number(c.prepared || 0);
+  const inoculated = Number(c.inoculated || 0);
+
+  let batchStatus = 'PREPARE';
+  if (total === 0) batchStatus = 'SUPPRIME';
+  else if (prepared === 0) batchStatus = 'ENSEMENCE';
+  else if (inoculated > 0) batchStatus = 'PARTIELLEMENT_ENSEMENCE';
+
+  await client.query(
+    `UPDATE myc_grain_batches SET nb_units=$2, statut=$3, updated_at=now() WHERE id=$1`,
+    [Number(batchId), total, batchStatus]
+  );
+
+  return { total, prepared, inoculated, batchStatus };
+}
+
 async function executeGrainDeletion(client, target) {
   const unitId = Number(target.grainUnitId);
   const batchId = Number(target.batchId);
@@ -2412,23 +2438,8 @@ async function executeGrainDeletion(client, target) {
   const deleted = await client.query(`DELETE FROM myc_grain_units WHERE id=$1 RETURNING id,code,batch_id`, [unitId]);
   if (!deleted.rows.length) throw new Error('Pot/sac grain introuvable ou deja supprime.');
 
-  const counts = await client.query(`
-    SELECT COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE statut='PREPARE')::int AS prepared,
-           COUNT(*) FILTER (WHERE statut <> 'PREPARE')::int AS inoculated
-    FROM myc_grain_units
-    WHERE batch_id=$1
-  `, [batchId]);
-  const c = counts.rows[0] || { total: 0, prepared: 0, inoculated: 0 };
-  let batchStatus = 'PREPARE';
-  if (Number(c.total) === 0) batchStatus = 'SUPPRIME';
-  else if (Number(c.prepared) === 0) batchStatus = 'ENSEMENCE';
-  else if (Number(c.inoculated) > 0) batchStatus = 'PARTIELLEMENT_ENSEMENCE';
-
-  await client.query(
-    `UPDATE myc_grain_batches SET nb_units=$2, statut=$3, updated_at=now() WHERE id=$1`,
-    [batchId, Number(c.total), batchStatus]
-  );
+  const batchState = await recomputeGrainBatchStatus(client, batchId);
+  const batchStatus = batchState.batchStatus;
 
   return {
     deleted_id: unitId,
@@ -5819,6 +5830,26 @@ async function ensureGrainWorkflowSchema() {
     ALTER TABLE myc_grain_units
       ADD CONSTRAINT chk_myc_grain_units_no_legacy_stock_status
       CHECK (statut IS NULL OR UPPER(BTRIM(statut)) NOT IN ('EN_STOCK','STOCKE','STOCKEE','FRIGO'));
+
+    -- Keep preparation-lot status derived from the actual units, not from the last action only.
+    UPDATE myc_grain_batches b
+       SET statut = CASE
+         WHEN x.total = 0 THEN 'SUPPRIME'
+         WHEN x.prepared = x.total THEN 'PREPARE'
+         WHEN x.prepared = 0 THEN 'ENSEMENCE'
+         ELSE 'PARTIELLEMENT_ENSEMENCE'
+       END,
+       nb_units = x.total,
+       updated_at = now()
+      FROM (
+        SELECT b2.id,
+               COUNT(u.id)::int AS total,
+               COUNT(u.id) FILTER (WHERE UPPER(BTRIM(COALESCE(u.statut,'')))='PREPARE')::int AS prepared
+          FROM myc_grain_batches b2
+          LEFT JOIN myc_grain_units u ON u.batch_id=b2.id
+         GROUP BY b2.id
+      ) x
+     WHERE b.id=x.id;
   `);
 
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_batch ON myc_grain_units(batch_id)`);
@@ -5978,7 +6009,7 @@ app.get('/api/grain-batches', async (req, res) => {
       SELECT b.*,
              (SELECT COUNT(*)::int FROM myc_grain_units u WHERE u.batch_id=b.id) AS units_total,
              (SELECT COUNT(*)::int FROM myc_grain_units u WHERE u.batch_id=b.id AND u.statut='PREPARE') AS units_prepared,
-             (SELECT COUNT(*)::int FROM myc_grain_units u WHERE u.batch_id=b.id AND u.statut IN ('ENSEMENCE','EN_INCUBATION')) AS units_inoculated,
+             (SELECT COUNT(*)::int FROM myc_grain_units u WHERE u.batch_id=b.id AND UPPER(BTRIM(COALESCE(u.statut,'')))<>'PREPARE') AS units_inoculated,
              (SELECT COUNT(*)::int FROM myc_grain_units u WHERE u.batch_id=b.id AND u.statut='CONTAMINE') AS units_contaminated,
              (SELECT ROUND(AVG(j.propagation_pct), 1)
                 FROM myc_grain_journal j
@@ -6481,7 +6512,8 @@ app.post('/api/grain-inoculations', async (req, res) => {
       return res.status(400).json({ error: "La source d'inoculation ne correspond pas a l'isolation des pots/sacs selectionnes." });
     }
 
-    const mainBatchId = Number(units.rows[0].batch_id);
+    const affectedBatchIds = [...new Set(units.rows.map(u => Number(u.batch_id)).filter(Boolean))];
+    const mainBatchId = Number(affectedBatchIds[0]);
     const code = grainInocCode();
     await client.query(`
       INSERT INTO myc_grain_inoculations
@@ -6524,11 +6556,12 @@ app.post('/api/grain-inoculations', async (req, res) => {
       WHERE id=ANY($1)
     `, [unitIds, sourceType, sourceGrainUnitId, sourceGrainUnitCode, lcLotId, lcPotId, lcCode, lcPotCode, sourcePetriId || null, p3Code || null, dateInocDateTime, vol]);
 
-    await client.query(`
-      UPDATE myc_grain_batches
-      SET statut='PARTIELLEMENT_ENSEMENCE', updated_at=now()
-      WHERE id=$1
-    `, [mainBatchId]);
+    // The preparation-lot status reflects the real composition of the lot:
+    // PREPARE = all units still available; PARTIELLEMENT_ENSEMENCE = mix of prepared/inoculated;
+    // ENSEMENCE = every remaining unit has been inoculated.
+    for (const affectedBatchId of affectedBatchIds) {
+      await recomputeGrainBatchStatus(client, affectedBatchId);
+    }
 
     await client.query('COMMIT');
     res.status(201).json({
