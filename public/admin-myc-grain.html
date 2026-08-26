@@ -199,21 +199,28 @@
     .grain-history-search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:16px;height:16px;display:flex;align-items:center;justify-content:center;color:#6d7b72;pointer-events:none;z-index:2;font-size:15px;line-height:1}
     .grain-history-search:before{content:none!important}
     .grain-history-search input{padding-left:52px!important}.grain-history-search input::placeholder{color:#79857d;opacity:1}
-    .grain-history-filter-row th{position:sticky!important;top:31px!important;z-index:11!important;background:#fbfdfb!important;padding:5px 6px!important;border-bottom:1px solid #dce6df!important;box-shadow:none!important}
-    .grain-filter-control{width:100%!important;height:34px!important;margin:0!important;padding:6px 30px 6px 10px!important;border:1px solid #d7dfda!important;border-radius:8px!important;background:#fff!important;font-size:11px!important;color:#35433a!important;font-weight:700!important;text-transform:none!important;letter-spacing:0!important}
-    .grain-date-filter{display:flex;align-items:center;gap:6px}
-    .grain-date-filter input{min-width:130px!important}
-    .grain-sort-buttons{display:flex;gap:3px;flex:0 0 auto}
-    .grain-sort-btn{width:28px;height:30px;border:1px solid #d7dfda;border-radius:7px;background:#fff;color:#5c685f;font-size:12px;font-weight:900;cursor:pointer;padding:0}
-    .grain-sort-btn:hover,.grain-sort-btn.active{border-color:#8fc29e;background:#ecf8f0;color:var(--green-dark)}
-    .grain-filter-reset{width:100%;height:30px;border:1px solid #d7dfda;border-radius:7px;background:#fff;color:#5c685f;font-size:9px;font-weight:900;cursor:pointer}
-    .grain-filter-reset:hover{border-color:#d7a450;background:#fff8ed;color:#8a5b18}
+    .grain-header-filter{position:relative;display:inline-block;vertical-align:middle}
+    .grain-header-filter>summary{list-style:none;cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:5px;color:#657269;font:inherit;font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+    .grain-header-filter>summary::-webkit-details-marker{display:none}.grain-header-filter>summary::marker{content:'';font-size:0}
+    .grain-header-filter>summary:after{content:'▾';font-size:9px;color:#87928b;transition:transform .15s ease}
+    .grain-header-filter[open]>summary:after{transform:rotate(180deg)}
+    .grain-header-filter.is-active>summary{color:var(--green-dark)}
+    .grain-header-filter.is-active>summary:before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 2px rgba(47,163,90,.14)}
+    .grain-header-popover{position:absolute;top:24px;left:0;z-index:160;min-width:210px;background:#fff;border:1px solid #d9e2dc;border-radius:11px;box-shadow:0 12px 30px rgba(29,45,35,.18);padding:10px;text-transform:none;letter-spacing:0;font-size:11px;font-weight:700;color:#344138}
+    .grain-header-filter.align-right .grain-header-popover{left:auto;right:0}
+    .grain-header-popover label{font-size:10px!important;margin-bottom:5px!important;color:#657269!important}
+    .grain-header-popover input[type=date]{height:36px!important;margin:0 0 8px!important;padding:6px 9px!important;font-size:11px!important;border-radius:8px!important}
+    .grain-header-option{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;border:0;background:#fff;color:#344138;padding:8px 9px;border-radius:8px;font-size:11px;font-weight:800;cursor:pointer;text-align:left}
+    .grain-header-option:hover{background:#f1f8f3;color:var(--green-dark)}
+    .grain-header-option.active{background:#e7f6ec;color:var(--green-dark)}
+    .grain-header-option small{font-size:9px;font-weight:700;color:#849087}
+    .grain-header-separator{height:1px;background:#e8eeea;margin:6px 0}
+    .grain-header-clear{display:block;width:100%;border:0;background:#faf7f2;color:#7b5636;padding:7px 9px;border-radius:8px;font-size:10px;font-weight:900;cursor:pointer;text-align:center}
+    .grain-header-clear:hover{background:#f4eadf}
     .grain-batch-source{line-height:1.35}
     .grain-batch-source strong{font-size:10px}
     .grain-batch-source small{display:block;color:#748078;margin-top:1px;font-size:9px}
-    @media(max-width:900px){.grain-card-titlebar{align-items:flex-start}.grain-export-menu{margin-left:auto}.grain-history-filter-row th{top:31px!important}}
-    .grain-history-table .grain-history-filter-row th:nth-child(3){min-width:170px}
-    .grain-history-table .grain-history-filter-row th:nth-child(7){min-width:130px}
+    @media(max-width:900px){.grain-card-titlebar{align-items:flex-start}.grain-export-menu{margin-left:auto}.grain-header-popover{min-width:190px}}
 
   </style>
 </head>
@@ -374,13 +381,46 @@
               <div class="grain-history-pagesize"><span>Lignes</span><select id="grain-history-page-size" onchange="changeGrainHistoryPageSize(this.value)"><option value="25" selected>25</option><option value="50">50</option><option value="100">100</option></select></div>
             </div>
             <div class="table-responsive grain-history-wrap" id="grain-history-scroll"><table class="lots-table grain-history-table"><colgroup><col style="width:23%"><col style="width:14%"><col style="width:23%"><col style="width:12%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:3%"></colgroup><thead>
-              <tr><th>Lot</th><th>Date</th><th>Source</th><th>Type / capacité</th><th>Jour</th><th>Propagation</th><th>Statut</th><th></th></tr>
-              <tr class="grain-history-filter-row">
-                <th><button type="button" class="grain-filter-reset" onclick="resetGrainHistoryFilters()">Réinitialiser</button></th>
-                <th><div class="grain-date-filter"><input class="grain-filter-control" id="grain-history-date-filter" type="date" onchange="applyGrainHistoryDateFilter(this.value)" title="Filtrer par date"><div class="grain-sort-buttons"><button type="button" class="grain-sort-btn" id="grain-date-sort-asc" onclick="setGrainHistoryDateSort('asc')" title="Date croissante">↑</button><button type="button" class="grain-sort-btn active" id="grain-date-sort-desc" onclick="setGrainHistoryDateSort('desc')" title="Date décroissante">↓</button></div></div></th>
-                <th><select class="grain-filter-control" id="grain-history-source-filter" onchange="applyGrainHistorySourceFilter(this.value)"><option value="ALL">Toutes</option><option value="P3">P3 Direct</option><option value="GRAIN">Grain</option><option value="LC">LC</option></select></th>
-                <th></th><th></th><th></th>
-                <th><select class="grain-filter-control" id="grain-history-status-filter" onchange="applyGrainHistoryStatusFilter(this.value)"><option value="ALL">Tous</option><option value="ENSEMENCE">Ensemencé</option><option value="EN_INCUBATION">Incubation</option><option value="PRET">Prêt</option><option value="STOCK">Stocké</option><option value="CONTAMINE">Contaminé</option></select></th>
+              <tr>
+                <th>Lot</th>
+                <th>
+                  <details class="grain-header-filter" id="grain-date-menu" onclick="event.stopPropagation()">
+                    <summary>Date</summary>
+                    <div class="grain-header-popover">
+                      <label for="grain-history-date-filter">Rechercher une date</label>
+                      <input id="grain-history-date-filter" type="date" onchange="applyGrainHistoryDateFilter(this.value)">
+                      <button type="button" class="grain-header-option" id="grain-date-sort-desc" onclick="setGrainHistoryDateSort('desc')">Plus récent d'abord <small>↓</small></button>
+                      <button type="button" class="grain-header-option" id="grain-date-sort-asc" onclick="setGrainHistoryDateSort('asc')">Plus ancien d'abord <small>↑</small></button>
+                      <div class="grain-header-separator"></div>
+                      <button type="button" class="grain-header-clear" onclick="clearGrainHistoryDateFilter()">Effacer le filtre de date</button>
+                    </div>
+                  </details>
+                </th>
+                <th>
+                  <details class="grain-header-filter" id="grain-source-menu" onclick="event.stopPropagation()">
+                    <summary>Source</summary>
+                    <div class="grain-header-popover">
+                      <button type="button" class="grain-header-option grain-source-option" data-value="ALL" onclick="applyGrainHistorySourceFilter('ALL')">Toutes les sources</button>
+                      <button type="button" class="grain-header-option grain-source-option" data-value="P3" onclick="applyGrainHistorySourceFilter('P3')">P3 Direct</button>
+                      <button type="button" class="grain-header-option grain-source-option" data-value="GRAIN" onclick="applyGrainHistorySourceFilter('GRAIN')">Grain</button>
+                      <button type="button" class="grain-header-option grain-source-option" data-value="LC" onclick="applyGrainHistorySourceFilter('LC')">LC</button>
+                    </div>
+                  </details>
+                </th>
+                <th>Type / capacité</th><th>Jour</th><th>Propagation</th>
+                <th>
+                  <details class="grain-header-filter align-right" id="grain-status-menu" onclick="event.stopPropagation()">
+                    <summary>Statut</summary>
+                    <div class="grain-header-popover">
+                      <button type="button" class="grain-header-option grain-status-option" data-value="ALL" onclick="applyGrainHistoryStatusFilter('ALL')">Tous les statuts</button>
+                      <button type="button" class="grain-header-option grain-status-option" data-value="ENSEMENCE" onclick="applyGrainHistoryStatusFilter('ENSEMENCE')">Ensemencé</button>
+                      <button type="button" class="grain-header-option grain-status-option" data-value="EN_INCUBATION" onclick="applyGrainHistoryStatusFilter('EN_INCUBATION')">Incubation</button>
+                      <button type="button" class="grain-header-option grain-status-option" data-value="PRET" onclick="applyGrainHistoryStatusFilter('PRET')">Prêt</button>
+                      <button type="button" class="grain-header-option grain-status-option" data-value="STOCK" onclick="applyGrainHistoryStatusFilter('STOCK')">Stocké</button>
+                      <button type="button" class="grain-header-option grain-status-option" data-value="CONTAMINE" onclick="applyGrainHistoryStatusFilter('CONTAMINE')">Contaminé</button>
+                    </div>
+                  </details>
+                </th>
                 <th></th>
               </tr>
             </thead><tbody id="units-table-body"><tr><td colspan="8" class="text-center">Chargement...</td></tr></tbody></table></div>
@@ -568,6 +608,8 @@
     }
     function closeExportMenus(){document.querySelectorAll('.grain-export-menu[open]').forEach(d=>d.removeAttribute('open'));}
     document.addEventListener('click',e=>{if(!e.target.closest('.grain-export-menu'))closeExportMenus();});
+    function closeGrainHeaderFilters(){document.querySelectorAll('.grain-header-filter[open]').forEach(d=>d.removeAttribute('open'));}
+    document.addEventListener('click',e=>{if(!e.target.closest('.grain-header-filter'))closeGrainHeaderFilters();});
     function htmlTableDownload(filename,title,headers,rows){
       const table=`<table border="1"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
       const html=`<html><head><meta charset="utf-8"></head><body><h3>${esc(title)}</h3>${table}</body></html>`;
@@ -1032,12 +1074,13 @@
     };
 
     window.applyGrainHistoryDateFilter=function(value){grainHistoryDateFilter=String(value||'');grainHistoryPage=1;renderUnits();};
+    window.clearGrainHistoryDateFilter=function(){grainHistoryDateFilter='';grainHistoryPage=1;if($('grain-history-date-filter'))$('grain-history-date-filter').value='';renderUnits();};
     window.applyGrainHistorySourceFilter=function(value){grainHistorySourceFilter=['P3','GRAIN','LC'].includes(String(value||'').toUpperCase())?String(value).toUpperCase():'ALL';grainHistoryPage=1;renderUnits();};
     window.applyGrainHistoryStatusFilter=function(value){applyGrainStatusFilter(value);};
     window.setGrainHistoryDateSort=function(value){grainHistoryDateSort=value==='asc'?'asc':'desc';grainHistoryPage=1;renderUnits();};
     window.resetGrainHistoryFilters=function(){
       grainHistorySearch='';grainHistoryDateFilter='';grainHistorySourceFilter='ALL';grainHistoryDateSort='desc';grainStatusFilter='ALL';grainHistoryPage=1;
-      if($('grain-history-search'))$('grain-history-search').value='';if($('grain-history-date-filter'))$('grain-history-date-filter').value='';if($('grain-history-source-filter'))$('grain-history-source-filter').value='ALL';if($('grain-history-status-filter'))$('grain-history-status-filter').value='ALL';renderUnits();
+      if($('grain-history-search'))$('grain-history-search').value='';if($('grain-history-date-filter'))$('grain-history-date-filter').value='';renderUnits();
     };
     window.changeGrainHistoryPageSize=function(value){
       const n=Number(value||25);
@@ -1075,10 +1118,13 @@
       syncGrainStatusFilterOptions();
       renderGrainHistoryChips();
       if($('grain-history-date-filter'))$('grain-history-date-filter').value=grainHistoryDateFilter;
-      if($('grain-history-source-filter'))$('grain-history-source-filter').value=grainHistorySourceFilter;
-      if($('grain-history-status-filter'))$('grain-history-status-filter').value=grainStatusFilter;
       $('grain-date-sort-asc')?.classList.toggle('active',grainHistoryDateSort==='asc');
       $('grain-date-sort-desc')?.classList.toggle('active',grainHistoryDateSort==='desc');
+      $('grain-date-menu')?.classList.toggle('is-active',Boolean(grainHistoryDateFilter)||grainHistoryDateSort!=='desc');
+      $('grain-source-menu')?.classList.toggle('is-active',grainHistorySourceFilter!=='ALL');
+      $('grain-status-menu')?.classList.toggle('is-active',grainStatusFilter!=='ALL');
+      document.querySelectorAll('.grain-source-option').forEach(b=>b.classList.toggle('active',b.dataset.value===grainHistorySourceFilter));
+      document.querySelectorAll('.grain-status-option').forEach(b=>b.classList.toggle('active',b.dataset.value===grainStatusFilter));
       const rows=getFilteredGrainHistoryRows();
       const totalPages=Math.max(1,Math.ceil(rows.length/grainHistoryPageSize));
       if(grainHistoryPage>totalPages)grainHistoryPage=totalPages;
