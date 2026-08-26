@@ -442,7 +442,7 @@
     function semisGroupDate(u){return u?.inoculation_created_at||u?.inoculated_at||u?.date_inoculation||u?.seeded_at||'';}
     function lcKey(lc){return `${lc.lc_lot_id}|${lc.lc_pot_id || ''}`}
     function selectedLcFromSelect(id){const val=$(id)?.value||'';return validLcs.find(l=>lcKey(l)===val)||null}
-    function statusBadge(st){st=String(st||'').toUpperCase(); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK'||st==='EN_STOCK'||st==='STOCKE'||st==='STOCKEE'||st==='FRIGO')return '<span class="badge-pill ok">Stock</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
+    function statusBadge(st){st=String(st||'').toUpperCase(); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK')return '<span class="badge-pill ok">Stock</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
     function apiErrorMessage(e){return e && e.message ? e.message : 'Erreur API inconnue'}
     async function parseApiResponse(r,path){
       const text=await r.text();
@@ -560,7 +560,7 @@
       return Array.from(map.values()).sort((a,b)=>String(a.code).localeCompare(String(b.code)));
     }
 
-    function isUnitStored(u){const st=String(u?.statut||u?.status||'').toUpperCase();return !!(u?.storage_at||['STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(st));}
+    function isUnitStored(u){const st=String(u?.statut||u?.status||'').toUpperCase();return !!(u?.storage_at||st==='STOCK');}
     function getGrainPublicBaseUrl(){let origin=window.location.origin;let host=window.location.hostname;let saved=localStorage.getItem('biotechagro_grain_public_base_url');if(saved&&/^https?:\/\//i.test(saved))return saved.replace(/\/$/,'');if(host==='localhost'||host==='127.0.0.1'){let suggested=origin.replace('localhost','192.168.1.26').replace('127.0.0.1','192.168.1.26');let value=prompt("Adresse du serveur à mettre dans les QR codes grain pour le téléphone.\n\nExemple : http://192.168.1.26:3000\n\nSi tu imprimes depuis localhost, le téléphone ne peut pas ouvrir localhost.",suggested);let clean=String(value||suggested).trim().replace(/\/$/,'');localStorage.setItem('biotechagro_grain_public_base_url',clean);return clean;}return origin.replace(/\/$/,'');}
     function resetGrainPublicBaseUrl(){localStorage.removeItem('biotechagro_grain_public_base_url');alert("Adresse QR grain réinitialisée. À la prochaine impression depuis localhost, le système redemandera l’adresse du serveur.");}
     function qrUrl(data){return 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data='+encodeURIComponent(data);}
@@ -814,10 +814,6 @@
       ['EN_INCUBATION','Incubation'],
       ['PRET','Prêt'],
       ['STOCK','Stock'],
-      ['EN_STOCK','En stock'],
-      ['STOCKE','Stocké'],
-      ['STOCKEE','Stockée'],
-      ['FRIGO','Frigo'],
       ['CONTAMINE','Contaminé']
     ];
     function grainStatusLabel(value){

@@ -905,7 +905,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
         FROM myc_grain_units
         WHERE storage_at IS NULL
           AND UPPER(COALESCE(statut,'PREPARE')) NOT IN
-          ('STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO','SUPPRIME','CONTAMINE','UTILISE','PERIME','PERIMEE','REJETE')
+          ('STOCK','SUPPRIME','CONTAMINE','UTILISE','PERIME','PERIMEE','REJETE')
       `),
       realPool.query(`SELECT count(*)::int AS total FROM iso_petris WHERE deleted_at IS NULL`),
       realPool.query(`SELECT count(*)::int AS total FROM lc_pots WHERE deleted_at IS NULL`),
@@ -937,7 +937,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
           SELECT CASE
             WHEN UPPER(COALESCE(statut,'')) IN ('SUPPRIME','UTILISE') THEN 'Retiré / terminé'
             WHEN UPPER(COALESCE(statut,'')) IN ('CONTAMINE','REJETE','PERIME','PERIMEE') THEN 'À surveiller'
-            WHEN UPPER(COALESCE(statut,'')) IN ('STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO') OR storage_at IS NOT NULL THEN 'Stock / conservation'
+            WHEN UPPER(COALESCE(statut,''))='STOCK' OR storage_at IS NOT NULL THEN 'Stock / conservation'
             WHEN UPPER(COALESCE(statut,'')) IN ('PRET','PRETE','VALIDE','VALIDÉ') THEN 'Prêt / validé'
             ELSE 'En cours'
           END AS category
@@ -5808,6 +5808,19 @@ async function ensureGrainWorkflowSchema() {
       ADD CONSTRAINT chk_grain_unit_source_type CHECK (inoculation_source_type IS NULL OR inoculation_source_type IN ('LC','P3','GRAIN'));
   `);
 
+  // Canonical Grain storage status: STOCK is the only storage status.
+  // Legacy aliases are normalized once and then blocked from being reintroduced.
+  await realPool.query(`
+    UPDATE myc_grain_units
+       SET statut='STOCK', updated_at=now()
+     WHERE UPPER(BTRIM(COALESCE(statut,''))) IN ('EN_STOCK','STOCKE','STOCKEE','FRIGO');
+
+    ALTER TABLE myc_grain_units DROP CONSTRAINT IF EXISTS chk_myc_grain_units_no_legacy_stock_status;
+    ALTER TABLE myc_grain_units
+      ADD CONSTRAINT chk_myc_grain_units_no_legacy_stock_status
+      CHECK (statut IS NULL OR UPPER(BTRIM(statut)) NOT IN ('EN_STOCK','STOCKE','STOCKEE','FRIGO'));
+  `);
+
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_batch ON myc_grain_units(batch_id)`);
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_statut ON myc_grain_units(statut)`);
   await realPool.query(`CREATE INDEX IF NOT EXISTS idx_myc_grain_units_source ON myc_grain_units(inoculation_source_type, source_petri_id, lc_pot_id)`);
@@ -6391,7 +6404,7 @@ app.post('/api/grain-inoculations', async (req, res) => {
         return res.status(400).json({ error: 'Pot/sac grain source introuvable.' });
       }
       const sourceStatus = String(selectedSourceGrain.statut || '').toUpperCase();
-      const sourceUsable = sourceStatus === 'PRET' || !!selectedSourceGrain.storage_at || ['STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(sourceStatus);
+      const sourceUsable = sourceStatus === 'PRET' || sourceStatus === 'STOCK' || !!selectedSourceGrain.storage_at;
       if (!sourceUsable) {
         return res.status(400).json({ error: 'Le grain source doit etre PRET ou stocke avant un transfert grain vers grain.' });
       }
