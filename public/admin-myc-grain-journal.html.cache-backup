@@ -224,7 +224,6 @@
     document.addEventListener('DOMContentLoaded',()=>{ if($('unit-select')) $('unit-select').addEventListener('change',()=>{ const id=Number($('unit-select').value||0); if(id) setCurrentById(id); }); $('journal-day-input').addEventListener('input',()=>{ selectedDay=Number($('journal-day-input').value||0); renderJournal(); }); loadAll(true); });
   })();
   </script>
-  <script src="js/mtd-api-cache.js"></script>
-<script src="js/admin-auth.js"></script>
+  <script src="js/admin-auth.js"></script>
 </body>
 </html>

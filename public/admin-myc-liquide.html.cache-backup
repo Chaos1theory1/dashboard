@@ -846,8 +846,7 @@
 </style>
 </head>
 <body>
-  <script src="js/mtd-api-cache.js"></script>
-<script src="js/admin-auth.js"></script>
+  <script src="js/admin-auth.js"></script>
   <div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro" /></div>
   <div class="admin-menu-bar">
     <a href="admin.html">Tableau de bord</a>
