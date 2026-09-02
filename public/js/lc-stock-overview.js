@@ -43,6 +43,13 @@
       .lc-st-active{background:#fff3cd;color:#856404;}
       .lc-overview-empty{text-align:center!important;padding:24px!important;color:#6c746e;}
       .lc-overview-count{font-size:11px;color:#6c746e;font-weight:700;margin-top:8px;}
+
+      /* P3 table: sticky header + compact status filter inside the header */
+      .banniere-historique-table table thead th{position:sticky!important;top:0!important;z-index:8!important;background:#f0f5f1!important;}
+      .banniere-historique-table table thead{position:sticky!important;top:0!important;z-index:8!important;}
+      .p3-status-filter-wrap{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+      .p3-status-filter-label{font:inherit;font-weight:900;color:inherit;}
+      .p3-status-filter{width:auto!important;min-width:112px!important;height:28px!important;margin:0!important;padding:4px 24px 4px 7px!important;border:1px solid #cbd8cf!important;border-radius:7px!important;background:#fff!important;color:#35433a!important;font-size:10px!important;font-weight:800!important;}
       @media(max-width:760px){
         .banniere-historique-table{max-height:460px!important;}
         .lc-overview-card{padding:16px;}
@@ -119,7 +126,7 @@
         </table>
       </div>
       <div id="lc-overview-count" class="lc-overview-count"></div>`;
-    anchor.insertAdjacentElement('afterend',card);
+    anchor.insertAdjacentElement('beforebegin',card);
 
     card.querySelector('#lc-overview-search').addEventListener('input',e=>{search=norm(e.target.value);render();});
     card.querySelector('#lc-overview-status').addEventListener('change',e=>{statusFilter=e.target.value;render();});
@@ -191,9 +198,89 @@
     }
   }
 
+  let p3StatusFilter='ALL';
+  let p3Observer=null;
+
+  function getP3Table(){
+    const wrap=document.querySelector('.banniere-historique-table');
+    return wrap ? wrap.querySelector('table') : null;
+  }
+
+  function p3StatusFromRow(tr){
+    if(!tr) return '';
+    const cells=[...tr.querySelectorAll('td')];
+    if(!cells.length) return '';
+    const table=getP3Table();
+    const headers=table?[...table.querySelectorAll('thead th')]:[];
+    let idx=headers.findIndex(th=>norm(th.textContent).includes('STATUT'));
+    if(idx<0) idx=cells.length-1;
+    return norm(cells[idx]?.textContent||'');
+  }
+
+  function collectP3Statuses(){
+    const table=getP3Table();
+    if(!table) return [];
+    return [...new Set([...table.querySelectorAll('tbody tr')].map(p3StatusFromRow).filter(Boolean))]
+      .sort((a,b)=>a.localeCompare(b,'fr'));
+  }
+
+  function applyP3StatusFilter(){
+    const table=getP3Table();
+    if(!table) return;
+    [...table.querySelectorAll('tbody tr')].forEach(tr=>{
+      const status=p3StatusFromRow(tr);
+      tr.style.display=(p3StatusFilter==='ALL'||status===p3StatusFilter)?'':'none';
+    });
+  }
+
+  function ensureP3HeaderFilter(){
+    const table=getP3Table();
+    if(!table||!table.tHead) return;
+    const headers=[...table.querySelectorAll('thead th')];
+    let th=headers.find(el=>norm(el.textContent).includes('STATUT'));
+    if(!th) return;
+
+    const statuses=collectP3Statuses();
+    let select=th.querySelector('#p3-stock-status-filter');
+    if(!select){
+      th.textContent='';
+      const wrap=document.createElement('div');
+      wrap.className='p3-status-filter-wrap';
+      const label=document.createElement('span');
+      label.className='p3-status-filter-label';
+      label.textContent='STATUT';
+      select=document.createElement('select');
+      select.id='p3-stock-status-filter';
+      select.className='p3-status-filter';
+      select.setAttribute('aria-label','Filtrer les P3 par statut');
+      select.addEventListener('change',e=>{p3StatusFilter=e.target.value;applyP3StatusFilter();});
+      wrap.append(label,select);
+      th.appendChild(wrap);
+    }
+    const current=p3StatusFilter;
+    select.innerHTML='<option value="ALL">Tous</option>'+statuses.map(st=>`<option value="${esc(st)}">${esc(st.charAt(0)+st.slice(1).toLowerCase())}</option>`).join('');
+    if([...select.options].some(o=>o.value===current)) select.value=current; else {p3StatusFilter='ALL';select.value='ALL';}
+    applyP3StatusFilter();
+  }
+
+  function setupP3TableEnhancements(){
+    const wrap=document.querySelector('.banniere-historique-table');
+    if(!wrap) return;
+    ensureP3HeaderFilter();
+    if(p3Observer) p3Observer.disconnect();
+    let queued=false;
+    p3Observer=new MutationObserver(()=>{
+      if(queued) return;
+      queued=true;
+      requestAnimationFrame(()=>{queued=false;ensureP3HeaderFilter();});
+    });
+    p3Observer.observe(wrap,{childList:true,subtree:true,characterData:true});
+  }
+
   function init(){
     addStyles();
     injectCard();
+    setupP3TableEnhancements();
     if(document.getElementById('lc-stock-overview-card')) load();
   }
 
