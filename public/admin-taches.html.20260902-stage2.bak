@@ -78,7 +78,6 @@
     @media(max-width:720px){.admin-menu-bar a{display:inline-block;margin:6px 8px;font-size:11px}.task-item{grid-template-columns:auto 1fr}.task-action{grid-column:2;text-align:left}.task-stats{grid-template-columns:1fr 1fr}.admin-card{padding:17px}}
   </style>
   <script src="js/mtd-api-cache.js"></script>
-<script src="js/mtd-heartbeat-guard.js"></script>
 <script src="js/admin-auth.js"></script>
   <script>requireAdminAuth();</script>
 </head>

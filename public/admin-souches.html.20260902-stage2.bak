@@ -730,7 +730,6 @@
 
 <body>
 <script src="js/mtd-api-cache.js"></script>
-<script src="js/mtd-heartbeat-guard.js"></script>
 <script src="js/admin-auth.js"></script>
   <script>
     (function () {

@@ -27,7 +27,6 @@
 </head>
 <body>
   <script src="js/mtd-api-cache.js"></script>
-<script src="js/mtd-heartbeat-guard.js"></script>
 <script src="js/admin-auth.js"></script>
   <div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro"></div>
   <div class="admin-menu-bar"><a href="admin.html">Tableau de bord</a><a href="admin-taches.html">Tâches obligatoires</a><a href="admin-souches.html">Souches</a><a href="admin-isolement.html">Isolement tissulaire</a><a href="admin-myc-liquide.html">Mycélium liquide</a><a href="admin-myc-grain.html">Mycélium sur grain</a></div>
