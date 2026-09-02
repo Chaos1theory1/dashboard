@@ -31,30 +31,6 @@ let cyclesRoutes = require("./routes/cycles");
 let app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
-// MTD_PERF_V1: lightweight API timing. Visible in Chrome DevTools as Server-Timing.
-app.use((req, res, next) => {
-  const perfStarted = process.hrtime.bigint();
-  const originalWriteHead = res.writeHead;
-  let timingAdded = false;
-  res.writeHead = function (...args) {
-    if (!timingAdded) {
-      timingAdded = true;
-      const ms = Number(process.hrtime.bigint() - perfStarted) / 1e6;
-      try {
-        if (!res.hasHeader("Server-Timing")) res.setHeader("Server-Timing", `app;dur=${ms.toFixed(1)}`);
-      } catch (_) {}
-    }
-    return originalWriteHead.apply(this, args);
-  };
-  res.on("finish", () => {
-    const ms = Number(process.hrtime.bigint() - perfStarted) / 1e6;
-    if (req.path && req.path.startsWith("/api/") && ms >= 500) {
-      console.warn(`[perf] ${req.method} ${req.originalUrl || req.url} ${ms.toFixed(0)}ms`);
-    }
-  });
-  next();
-});
-
 
 let PORT = Number(process.env.PORT || 3000);
 const IS_VERCEL = isVercelRuntime();
@@ -196,25 +172,6 @@ function clearSessionCookie(req, res) {
   res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? "; Secure" : ""}`);
 }
 
-
-// MTD_PERF_V1: short-lived RBAC cache.
-// PostgreSQL remains the source of truth; cache disappears with the serverless instance.
-const applicationUserCache = new Map();
-const APP_USER_CACHE_MS = Math.max(5000, Number(process.env.APP_USER_CACHE_MS || 30000));
-async function loadApplicationUserCached(userId) {
-  const key = String(userId || "");
-  const now = Date.now();
-  const hit = applicationUserCache.get(key);
-  if (hit && hit.expiresAt > now) return hit.value;
-  const value = await loadApplicationUser(userId);
-  applicationUserCache.set(key, { value, expiresAt: now + APP_USER_CACHE_MS });
-  return value;
-}
-function invalidateApplicationUserCache(userId = null) {
-  if (userId) applicationUserCache.delete(String(userId));
-  else applicationUserCache.clear();
-}
-
 async function requireAdminSession(req, res, next) {
   const session = readSession(req);
   if (!session) {
@@ -226,9 +183,8 @@ async function requireAdminSession(req, res, next) {
   }
   try {
     if (session.role !== "visitor" && session.userId) {
-      // MTD_PERF_V1: avoid production DDL on every cold serverless instance.
-      if (String(process.env.AUTH_RUNTIME_SCHEMA_CHECKS || "") === "1") await ensureUserManagementSchema();
-      const access = await loadApplicationUserCached(session.userId);
+      await ensureUserManagementSchema();
+      const access = await loadApplicationUser(session.userId);
       if (!access || !access.active) {
         clearSessionCookie(req, res);
         return res.status(403).json({ authenticated: false, error: "Compte utilisateur gelé ou supprimé" });
@@ -901,29 +857,6 @@ const productionActionLabels = { added:'Ajout du suivi',modified:'Modification d
 
 // Read-only dashboard data. Each value is calculated from the production tables;
 // the frontend never invents or stores a dashboard number.
-
-// MTD_PERF_V1: short dashboard response cache, separated by role.
-const dashboardResponseCache = new Map();
-const DASHBOARD_CACHE_MS = Math.max(5000, Number(process.env.DASHBOARD_CACHE_MS || 20000));
-app.use("/api/dashboard/summary", (req, res, next) => {
-  if (req.method !== "GET") return next();
-  const cacheKey = String(req.adminSession?.role || "operator");
-  const hit = dashboardResponseCache.get(cacheKey);
-  if (hit && hit.expiresAt > Date.now()) {
-    res.setHeader("X-MTD-Cache", "HIT");
-    return res.json(hit.payload);
-  }
-  const originalJson = res.json.bind(res);
-  res.json = (payload) => {
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      dashboardResponseCache.set(cacheKey, { payload, expiresAt: Date.now() + DASHBOARD_CACHE_MS });
-      res.setHeader("X-MTD-Cache", "MISS");
-    }
-    return originalJson(payload);
-  };
-  next();
-});
-
 app.get('/api/dashboard/summary', async (req, res) => {
   try {
     await ensureUserManagementSchema();

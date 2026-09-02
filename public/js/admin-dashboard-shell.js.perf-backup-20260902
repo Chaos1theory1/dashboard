@@ -47,9 +47,6 @@
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   let searchTimer=null;
   let iconRefreshTimer=null;
-  // MTD_PERF_V1: avoid duplicate approval fan-out.
-  let requestsLoadedAt=0;
-  let requestsLoading=false;
 
   function iconMarkup(name){return `<i data-lucide="${name}"></i>`}
 
@@ -100,7 +97,7 @@
     top.querySelector('.mtd-shell-menu').addEventListener('click',()=>{sidebar.classList.toggle('open');overlay.classList.toggle('open')});
     overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('open')});
     top.querySelector('.mtd-shell-logout').addEventListener('click',()=>window.logoutAdmin&&window.logoutAdmin());
-    top.querySelector('#mtd-shell-bell').addEventListener('click',event=>{event.stopPropagation();const opening=!notifications.classList.contains('open');notifications.classList.toggle('open');if(opening)loadRequests();});
+    top.querySelector('#mtd-shell-bell').addEventListener('click',event=>{event.stopPropagation();notifications.classList.toggle('open')});
     document.addEventListener('click',event=>{if(!notifications.contains(event.target)&&!event.target.closest('#mtd-shell-bell'))notifications.classList.remove('open')});
     bindSearch();
     injectPageHeader();
@@ -163,14 +160,11 @@
 
   async function loadSystemStatus(){
     const label=document.getElementById('mtd-system-label'),dot=document.getElementById('mtd-system-dot'),copy=document.getElementById('mtd-system-copy'),time=document.getElementById('mtd-system-time');
-    const cacheKey='mtd:system-status:v1';
-    const renderOk=(serverNow)=>{label.textContent='Opérationnel';dot.classList.remove('error');copy.textContent='PostgreSQL répond correctement. Données de production disponibles.';time.textContent=new Date(serverNow||Date.now()).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
-    const renderError=()=>{label.textContent='Connexion limitée';dot.classList.add('error');copy.textContent='La base de données ne répond pas correctement. Certaines pages peuvent être indisponibles.';time.textContent='—'};
-    try{const cached=JSON.parse(sessionStorage.getItem(cacheKey)||'null');if(cached&&Date.now()-Number(cached.at||0)<120000){cached.ok?renderOk(cached.now):renderError();return}}catch(_){}
-    // MTD_PERF_V1: let the page's primary data request use the DB pool first.
-    await sleep(800);
-    try{const response=await fetch('/api/ping',{credentials:'same-origin',cache:'no-store'});const data=await response.json().catch(()=>({}));if(!response.ok||data.db!=='ok')throw new Error();renderOk(data.now);try{sessionStorage.setItem(cacheKey,JSON.stringify({at:Date.now(),ok:true,now:data.now||Date.now()}))}catch(_){}}
-    catch(_){renderError();try{sessionStorage.setItem(cacheKey,JSON.stringify({at:Date.now(),ok:false}))}catch(_){}}
+    try{
+      const response=await fetch('/api/ping',{credentials:'same-origin',cache:'no-store'});const data=await response.json().catch(()=>({}));
+      if(!response.ok||data.db!=='ok')throw new Error();
+      label.textContent='Opérationnel';dot.classList.remove('error');copy.textContent='PostgreSQL répond correctement. Données de production disponibles.';time.textContent=new Date(data.now||Date.now()).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    }catch(_){label.textContent='Connexion limitée';dot.classList.add('error');copy.textContent='La base de données ne répond pas correctement. Certaines pages peuvent être indisponibles.';time.textContent='—'}
   }
 
   function bindSearch(){
@@ -192,9 +186,6 @@
 
   async function loadRequests(){
     const list=document.getElementById('mtd-shell-request-list');
-    if(requestsLoading)return;
-    if(Date.now()-requestsLoadedAt<30000)return;
-    requestsLoading=true;
     try{
       const endpoints=[
         ['/api/admin/photo-deletion-requests','Suppression photo','trash-2'],
@@ -212,7 +203,6 @@
       list.innerHTML=items.length?items.slice(0,8).map(item=>{const row=item.row;const who=row.requested_by_name||row.actor_name||'Utilisateur';const when=row.requested_at||row.created_at;let subject='Demande en attente';if(item.url.includes('photo-deletion'))subject=`Photo #${esc(row.photo_record_id||'')}`;else if(item.url.includes('petri-deletion'))subject=esc(row.petri_code||('Petri #'+(row.petri_id||'')));else if(item.url.includes('lc-deletion'))subject=esc(row.pot_code||row.lot_code||'Élément LC');else if(item.url.includes('grain-deletion'))subject=esc(row.unit_code||('Grain #'+(row.grain_unit_id||'')));else if(item.url.includes('strain-creation'))subject=esc(row.requested_code||row.payload?.code||'Souche externe');else if(item.url.includes('strain-certification'))subject=esc(row.strain_code||'Certification souche');return `<div class="mtd-shell-request"><span class="mtd-shell-request-icon">${iconMarkup(item.icon)}</span><span><strong>${esc(item.label)} — ${subject}</strong><small>${esc(who)} · ${esc(date(when))}</small></span></div>`}).join(''):'<div class="mtd-shell-empty">Aucune demande en attente.</div>';
       window.lucide?.createIcons();
     }catch(_){list.innerHTML='<div class="mtd-shell-empty">Impossible de charger les demandes.</div>'}
-    finally{requestsLoading=false;requestsLoadedAt=Date.now();if(list)list.dataset.ready='1'}
   }
 
   function applySession(auth){
@@ -221,7 +211,7 @@
     const name=document.getElementById('mtd-shell-name'),role=document.getElementById('mtd-shell-role');
     if(name)name.textContent=user.username||'Utilisateur';if(role)role.textContent=isAdmin?'Administrateur':user.role==='operator'?'Opérateur':user.role==='visitor'?'Visiteur':'Lecture seule';
     document.querySelectorAll('[data-mtd-admin-link]').forEach(el=>{el.hidden=!isAdmin;el.style.display=isAdmin?'':'none'});document.querySelectorAll('[data-mtd-admin-section]').forEach(el=>{el.hidden=!isAdmin;el.style.display=isAdmin?'':'none'});
-    const bell=document.getElementById('mtd-shell-bell');if(bell){bell.hidden=!isAdmin;bell.style.display=isAdmin?'':'none';if(isAdmin){const list=document.getElementById('mtd-shell-request-list');if(list&&!list.dataset.ready)list.innerHTML='<div class="mtd-shell-empty">Ouvrez la cloche pour charger les demandes.</div>'}else document.getElementById('mtd-shell-notifications')?.classList.remove('open')}
+    const bell=document.getElementById('mtd-shell-bell');if(bell){bell.hidden=!isAdmin;bell.style.display=isAdmin?'':'none';if(isAdmin)loadRequests();else document.getElementById('mtd-shell-notifications')?.classList.remove('open')}
   }
 
   const init=()=>{build();applySession(window.mtdSession);setTimeout(()=>{applySession(window.mtdSession);cleanLegacyIcons()},320)};
