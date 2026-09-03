@@ -5600,6 +5600,87 @@ app.post('/api/lc-workflow/pots/:id/stock', async (req, res) => {
 });
 
 
+
+// POST /api/lc-workflow/pots/:id/exhausted
+// Operational completion: a refrigerated LC pot has been fully used.
+// The pot is archived using the same lc_deletion_history table as deleted LC pots, with reason "Épuisé".
+app.post('/api/lc-workflow/pots/:id/exhausted', async (req, res) => {
+  if (!['admin','operator'].includes(String(req.adminSession?.role || ''))) {
+    return res.status(403).json({ error: 'Ce rôle ne peut pas marquer un pot LC comme épuisé.' });
+  }
+
+  const potId = Number(req.params.id);
+  if (!potId) return res.status(400).json({ error: 'Pot LC invalide.' });
+
+  await ensureLcDeletionWorkflowSchema();
+  await ensureLcPotWorkflowSchema();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const target = await loadLcDeletionTarget(client, 'pot', potId, true);
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pot LC introuvable ou déjà retiré.' });
+    }
+
+    const stored = target.row.fridge_stored === true || String(target.row.fridge_stored || '').toLowerCase() === 'true' || !!target.row.fridge_stored_at;
+    if (!stored) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Seuls les pots LC avec le statut Frigo / stocké peuvent être marqués Épuisé.' });
+    }
+
+    const actorName = req.adminSession?.username || 'Utilisateur';
+    const actorRole = req.adminSession?.role || 'operator';
+    const now = new Date();
+    const deletion = await executeLcDeletion(client, target);
+
+    await insertLcDeletionHistory(client, {
+      target,
+      reason: 'Épuisé',
+      requestedBy: req.adminSession?.userId || null,
+      requestedByName: actorName,
+      requestedByRole: actorRole,
+      requestedAt: now,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: actorName,
+      approvedAt: now,
+      deletionMode: actorRole === 'admin' ? 'admin_direct' : 'operator_approved',
+      contextData: {
+        completion_status: 'Épuisé',
+        completion_type: 'fully_used',
+        previous_status: target.row.status || null,
+        fridge_stored: true,
+        fridge_stored_at: target.row.fridge_stored_at || null,
+        fridge_expiry_date: target.row.fridge_expiry_date || null
+      },
+      originalData: deletion.originalData
+    });
+
+    await client.query(`
+      UPDATE lc_deletion_requests
+         SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),
+             review_note=COALESCE(NULLIF(review_note,''),'Épuisé — pot entièrement utilisé')
+       WHERE lc_pot_id=$1 AND resource_type='pot' AND status='pending'
+    `, [potId, req.adminSession?.userId || null, actorName]);
+
+    await client.query('COMMIT');
+    await recordProductionActivity(req, {
+      module: 'lc',
+      actionType: 'modified',
+      itemId: potId,
+      itemLabel: target.potCode || `Pot LC ${potId}`,
+      details: { completion_status: 'Épuisé', archived: true, lot_id: target.lcLotId }
+    });
+    return res.json({ success: true, status: 'Épuisé', archived: true, deleted_id: deletion.deleted_id });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('POST /api/lc-workflow/pots/:id/exhausted', e);
+    return res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/lc-workflow/lots/:id/upload-photo', lcUpload.single('photo'), async (req, res) => {
   try {
     await ensureLcPotWorkflowSchema();
@@ -7426,6 +7507,94 @@ app.post("/api/petris/:id/stock-frigo", handleStockFrigo);
 app.put("/api/petris/:id/stock-frigo", handleStockFrigo);
 app.post("/api/petris/:id/conservation-frigorifique", handleStockFrigo);
 app.put("/api/petris/:id/conservation-frigorifique", handleStockFrigo);
+
+
+// POST /api/petris/:id/exhausted
+// Operational completion: a refrigerated Petri dish has been fully used.
+// It is removed from active/stock lists and archived in the existing deletion history with reason "Épuisé".
+app.post('/api/petris/:id/exhausted', async (req, res) => {
+  if (!['admin','operator'].includes(String(req.adminSession?.role || ''))) {
+    return res.status(403).json({ error: 'Ce rôle ne peut pas marquer une boîte comme épuisée.' });
+  }
+
+  const petriId = Number(req.params.id);
+  if (!petriId) return res.status(400).json({ error: 'ID Petri invalide.' });
+
+  await ensurePetriDeletionWorkflowSchema();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query(`
+      SELECT id,isolement_id,parent_id,phase,j0,status,gelose_id,created_at,
+             storage_at,storage_limit_at,deleted_at,deleted_reason
+      FROM iso_petris
+      WHERE id=$1
+      FOR UPDATE
+    `, [petriId]);
+
+    if (!found.rows.length || found.rows[0].deleted_at) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Boîte de Petri introuvable ou déjà retirée.' });
+    }
+
+    const petri = found.rows[0];
+    const stored = !!petri.storage_at || ['STOCK_FRIGO','CONSERVATION_FRIGORIFIQUE','STOCK','CONSERVATION'].includes(String(petri.status || '').toUpperCase());
+    if (!stored) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'La boîte doit être en conservation frigorifique avant de pouvoir être marquée Épuisé.' });
+    }
+
+    const actorName = req.adminSession?.username || 'Utilisateur';
+    const actorRole = req.adminSession?.role || 'operator';
+    const now = new Date();
+    const petriCode = `P${petri.phase || '—'} ID ${petri.id}`;
+
+    await insertPetriDeletionHistory(client, {
+      petri,
+      petriCode,
+      reason: 'Épuisé',
+      requestedBy: req.adminSession?.userId || null,
+      requestedByName: actorName,
+      requestedByRole: actorRole,
+      requestedAt: now,
+      approvedBy: req.adminSession?.userId || null,
+      approvedByName: actorName,
+      approvedAt: now,
+      deletionMode: actorRole === 'admin' ? 'admin_direct' : 'operator_approved',
+      contextData: {
+        completion_status: 'Épuisé',
+        completion_type: 'fully_used',
+        previous_status: petri.status || null,
+        storage_at: petri.storage_at || null,
+        storage_limit_at: petri.storage_limit_at || null
+      }
+    });
+
+    const deleted = await executePetriSoftDeletion(client, petri, 'Épuisé');
+    await client.query(`
+      UPDATE petri_deletion_requests
+         SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),
+             review_note=COALESCE(NULLIF(review_note,''),'Épuisé — boîte entièrement utilisée')
+       WHERE petri_id=$1 AND status='pending'
+    `, [petriId, req.adminSession?.userId || null, actorName]);
+
+    await client.query('COMMIT');
+    await recordProductionActivity(req, {
+      module: 'petri',
+      actionType: 'modified',
+      itemId: petriId,
+      itemLabel: petriCode,
+      details: { completion_status: 'Épuisé', archived: true }
+    });
+    return res.json({ success: true, status: 'Épuisé', archived: true, petri: deleted });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('POST /api/petris/:id/exhausted', e);
+    return res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
 
 // POST /api/petris/:id/deletion-request
 // Operateur: demande d'approbation. Admin: suppression immediate.

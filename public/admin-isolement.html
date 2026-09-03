@@ -762,12 +762,10 @@
 
   </style>
 
-<style id="mtd-shell-prepaint-guard">
-  html.mtd-shell-loading .admin-big-logo,
-  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+<style id="petri-exhausted-style">
+.btn-petri-exhausted{border:0;border-radius:8px;padding:10px 16px;background:#8a5a18;color:#fff;font-weight:800;cursor:pointer;}
+.btn-petri-exhausted:hover{background:#70470f;}
 </style>
-<script>document.documentElement.classList.add('mtd-shell-loading');</script>
-
 </head>
 
 <body>
@@ -822,7 +820,21 @@
       });
     });
   </script>
-<section class="section section-md admin-wrapper">
+
+  <div class="admin-big-logo">
+    <img src="images/logo.png" alt="BaslyAgro" />
+  </div>
+
+  <div class="admin-menu-bar">
+    <a href="admin.html">Tableau de bord</a>
+    <a href="admin-taches.html">Tâches obligatoires</a>
+    <a href="admin-souches.html">Souches</a>
+    <a class="active" href="admin-isolement.html">Isolement tissulaire</a>
+    <a href="admin-myc-liquide.html">Mycélium liquide</a>
+    <a href="admin-myc-grain.html">Mycélium sur grain</a>
+  </div>
+
+  <section class="section section-md admin-wrapper">
     <div class="container">
       <h3 class="text-capitalize mb-4 text-center">
         Gestion de l'<span style="color: var(--baslyagro-green);">Isolement tissulaire</span>
@@ -2710,11 +2722,33 @@ ${labels}
           '<div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">' +
             '<a class="button-primary" style="width:auto;margin:0;text-decoration:none;" href="' + htmlEscape(journalHref) + '">📅 Ouvrir journal</a>' +
             '<button class="btn-label-print" onclick="printPetriLabelById(' + Number(petri.id) + ')">🖨️ Étiquette</button>' +
+            '<button type="button" class="btn-petri-exhausted" onclick="markPetriExhausted(' + Number(petri.id) + ')">✓ Épuisé</button>' +
           '</div>' +
           '<h5 style="margin-top:18px;">📸 Album photo</h5>' +
           (album.length ? '<div class="stock-photo-grid">' + album.map(function(ph) { return '<div><a href="' + htmlEscape(ph.file_url) + '" target="_blank"><img src="' + htmlEscape(ph.file_url) + '" alt="photo boîte"></a><button type="button" onclick="deletePetriSummaryPhoto(' + Number(petri.id) + ',' + Number(ph.id) + ')" style="width:100%;margin-top:6px;padding:7px;border:0;border-radius:6px;background:#c0392b;color:white;font-weight:700;cursor:pointer;">🗑️ Supprimer</button></div>'; }).join('') + '</div>' : '<p style="color:#777;">Aucune photo enregistrée pour cette boîte.</p>');
         document.getElementById("stock-summary-modal").style.display = "flex";
       }
+      window.markPetriExhausted = async function(petriId) {
+        const petri = currentPetris.find(function(p) { return Number(p.id) === Number(petriId); });
+        if (petri && !isPetriInFrigoStock(petri)) {
+          return alert('Cette boîte doit être en conservation frigorifique avant de pouvoir être marquée Épuisé.');
+        }
+        if (!confirm('Marquer cette boîte comme « Épuisé » ?\n\nElle sera retirée des listes actives et conservée dans l’historique de suppression avec le motif « Épuisé ».')) return;
+        try {
+          const response = await fetch('/api/petris/' + Number(petriId) + '/exhausted', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin'
+          });
+          const result = await response.json().catch(function() { return {}; });
+          if (!response.ok || !result.success) throw new Error(result.error || 'Impossible de marquer la boîte comme épuisée.');
+          document.getElementById('stock-summary-modal').style.display = 'none';
+          await loadPetrisList(selectedIsoId);
+          alert('✅ Boîte marquée Épuisé et archivée dans l’historique.');
+        } catch (e) {
+          alert('❌ ' + (e.message || e));
+        }
+      };
       window.openStockSummary = openStockSummary;
       window.deletePetriSummaryPhoto = async function(petriId, photoId) {
         if (!confirm('Supprimer définitivement cette photo ?\n\nLa référence commune sera aussi retirée si elle utilise cette image.')) return;

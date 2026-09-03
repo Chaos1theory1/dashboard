@@ -21,7 +21,11 @@
       /* P3 stock viewport: about 2x the previous height */
       .banniere-historique-table{max-height:520px!important;}
 
-      .lc-overview-card{background:#fff;padding:22px 24px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.07);margin:0 0 25px;}
+      .lc-overview-card{background:#fff;padding:22px 24px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.07);margin:0 0 25px;width:calc(100% + 160px);margin-left:-80px;}
+      .lc-overview-action{white-space:nowrap;}
+      .lc-exhausted-btn{border:0;border-radius:8px;padding:7px 12px;background:#8a5a18;color:#fff;font-size:10px;font-weight:900;cursor:pointer;}
+      .lc-exhausted-btn:hover:not(:disabled){background:#70470f;}
+      .lc-exhausted-btn:disabled{background:#d6d9d7;color:#8a918c;cursor:not-allowed;opacity:.8;}
       .lc-overview-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:12px;}
       .lc-overview-head h4{margin:0;font-weight:900;color:#1f2a22;}
       .lc-overview-sub{font-size:12px;color:#6c746e;margin-top:4px;}
@@ -50,6 +54,7 @@
       .p3-status-filter-wrap{display:flex;align-items:center;gap:6px;white-space:nowrap;}
       .p3-status-filter-label{font:inherit;font-weight:900;color:inherit;}
       .p3-status-filter{width:auto!important;min-width:112px!important;height:28px!important;margin:0!important;padding:4px 24px 4px 7px!important;border:1px solid #cbd8cf!important;border-radius:7px!important;background:#fff!important;color:#35433a!important;font-size:10px!important;font-weight:800!important;}
+      @media(max-width:1200px){.lc-overview-card{width:100%;margin-left:0;}}
       @media(max-width:760px){
         .banniere-historique-table{max-height:460px!important;}
         .lc-overview-card{padding:16px;}
@@ -121,8 +126,8 @@
       </div>
       <div class="lc-overview-wrap">
         <table class="lc-overview-table">
-          <thead><tr><th>LC / Pot</th><th>Source</th><th>Lot LC</th><th>Statut</th><th>Conservation</th></tr></thead>
-          <tbody id="lc-overview-body"><tr><td colspan="5" class="lc-overview-empty">Chargement…</td></tr></tbody>
+          <thead><tr><th>LC / Pot</th><th>Source</th><th>Lot LC</th><th>Statut</th><th>Conservation</th><th>Action</th></tr></thead>
+          <tbody id="lc-overview-body"><tr><td colspan="6" class="lc-overview-empty">Chargement…</td></tr></tbody>
         </table>
       </div>
       <div id="lc-overview-count" class="lc-overview-count"></div>`;
@@ -154,7 +159,7 @@
     });
 
     if(!filtered.length){
-      body.innerHTML='<tr><td colspan="5" class="lc-overview-empty">Aucun pot LC correspondant aux filtres.</td></tr>';
+      body.innerHTML='<tr><td colspan="6" class="lc-overview-empty">Aucun pot LC correspondant aux filtres.</td></tr>';
     }else{
       body.innerHTML=filtered.map(r=>`<tr>
         <td><div class="lc-overview-code">${esc(r.code)}</div><div class="lc-overview-small">Pot #${esc(r.pot.pot_number||r.pot.numero||'—')}</div></td>
@@ -162,6 +167,7 @@
         <td>${esc(r.lot.code||('LC #'+r.lot.id))}</td>
         <td><span class="lc-overview-badge ${r.status.cls}">${esc(r.status.label)}</span></td>
         <td>${conservationText(r)}</td>
+        <td class="lc-overview-action"><button type="button" class="lc-exhausted-btn" ${r.status.key==='FRIGO'?'':'disabled'} onclick="window.markLcPotExhausted(${Number(r.pot.id)},${Number(r.lot.id)})">✓ Épuisé</button></td>
       </tr>`).join('');
     }
     const count=document.getElementById('lc-overview-count');
@@ -194,7 +200,7 @@
       fillSources();
       render();
     }catch(e){
-      if(body) body.innerHTML=`<tr><td colspan="5" class="lc-overview-empty">Impossible de charger le suivi LC : ${esc(e.message)}</td></tr>`;
+      if(body) body.innerHTML=`<tr><td colspan="6" class="lc-overview-empty">Impossible de charger le suivi LC : ${esc(e.message)}</td></tr>`;
     }
   }
 
