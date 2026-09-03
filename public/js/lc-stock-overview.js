@@ -174,6 +174,50 @@
     if(count) count.textContent=`${filtered.length} pot${filtered.length===1?'':'s'} affiché${filtered.length===1?'':'s'} sur ${rows.length}`;
   }
 
+  window.markLcPotExhausted = async function(potId, lotId) {
+    const id=Number(potId);
+    if(!id) return;
+
+    const row=rows.find(r=>Number(r.pot?.id)===id);
+    if(!row || row.status?.key!=='FRIGO'){
+      window.alert('Ce pot LC doit être en statut « Frigo / stocké » avant de pouvoir être marqué Épuisé.');
+      return;
+    }
+
+    const label=row.code || `Pot LC #${id}`;
+    const confirmed=window.confirm(
+      `Marquer ${label} comme « Épuisé » ?\n\n`+
+      `Le pot sera retiré des listes LC actives et archivé dans l’historique avec le motif « Épuisé ».\n\n`+
+      `Cette action confirme que le contenu du pot a été entièrement utilisé.`
+    );
+    if(!confirmed) return;
+
+    const buttons=[...document.querySelectorAll('.lc-exhausted-btn')]
+      .filter(btn=>String(btn.getAttribute('onclick')||'').includes(`markLcPotExhausted(${id},`));
+    buttons.forEach(btn=>{btn.disabled=true;btn.textContent='Traitement…';});
+
+    try{
+      const response=await fetch(`${API_BASE}/api/lc-workflow/pots/${encodeURIComponent(id)}/exhausted`,{
+        method:'POST',
+        credentials:'same-origin',
+        headers:{'Accept':'application/json','Content-Type':'application/json'},
+        body:JSON.stringify({})
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(data.error||'Impossible de marquer ce pot LC comme Épuisé.');
+
+      // Backend archives it in lc_deletion_history. Remove it locally without
+      // reloading all lots/pots, which keeps database traffic low.
+      rows=rows.filter(r=>Number(r.pot?.id)!==id);
+      fillSources();
+      render();
+      window.alert(`✅ ${label} a été marqué Épuisé et archivé.`);
+    }catch(error){
+      buttons.forEach(btn=>{btn.disabled=false;btn.textContent='✓ Épuisé';});
+      window.alert(error?.message||'Erreur lors du passage en Épuisé.');
+    }
+  };
+
   function fillSources(){
     const sel=document.getElementById('lc-overview-source');
     if(!sel) return;
