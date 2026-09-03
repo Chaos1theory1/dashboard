@@ -932,13 +932,9 @@ app.use("/api/dashboard/summary", (req, res, next) => {
 
 app.get('/api/dashboard/summary', async (req, res) => {
   try {
-    await ensureUserManagementSchema();
-    await ensurePetriDeletionWorkflowSchema();
-    await ensureLcDeletionWorkflowSchema();
-    await ensureGrainDeletionWorkflowSchema();
-    await ensureIsoPetrisStorageSchema();
-    await ensureLcPotWorkflowSchema();
-    await ensureGrainWorkflowSchema();
+   // MTD_PERF_STEP12:
+  // Database structure is managed by Supabase migrations.
+  // Do not run CREATE/ALTER/INDEX checks on normal dashboard requests.
 
     const isAdmin = req.adminSession?.role === 'admin';
     const canWrite = req.adminSession?.role !== 'viewer';
