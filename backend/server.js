@@ -932,9 +932,13 @@ app.use("/api/dashboard/summary", (req, res, next) => {
 
 app.get('/api/dashboard/summary', async (req, res) => {
   try {
-   // MTD_PERF_STEP12:
-  // Database structure is managed by Supabase migrations.
-  // Do not run CREATE/ALTER/INDEX checks on normal dashboard requests.
+    await ensureUserManagementSchema();
+    await ensurePetriDeletionWorkflowSchema();
+    await ensureLcDeletionWorkflowSchema();
+    await ensureGrainDeletionWorkflowSchema();
+    await ensureIsoPetrisStorageSchema();
+    await ensureLcPotWorkflowSchema();
+    await ensureGrainWorkflowSchema();
 
     const isAdmin = req.adminSession?.role === 'admin';
     const canWrite = req.adminSession?.role !== 'viewer';
@@ -988,7 +992,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
                  count(*) FILTER (
                    WHERE storage_at IS NULL
                      AND UPPER(COALESCE(statut,'PREPARE')) NOT IN
-                       ('STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO','SUPPRIME','CONTAMINE','UTILISE','PERIME','PERIMEE','REJETE')
+                       ('STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO','VENDU','SUPPRIME','CONTAMINE','UTILISE','PERIME','PERIMEE','REJETE')
                  )::int AS active
           FROM myc_grain_units
         ), strain AS (
@@ -1033,7 +1037,7 @@ app.get('/api/dashboard/summary', async (req, res) => {
           FROM lc_pots
           UNION ALL
           SELECT CASE
-            WHEN UPPER(COALESCE(statut,'')) IN ('SUPPRIME','UTILISE') THEN 'Retiré / terminé'
+            WHEN UPPER(COALESCE(statut,'')) IN ('SUPPRIME','UTILISE','VENDU') THEN 'Retiré / terminé'
             WHEN UPPER(COALESCE(statut,'')) IN ('CONTAMINE','REJETE','PERIME','PERIMEE') THEN 'À surveiller'
             WHEN UPPER(COALESCE(statut,'')) IN ('STOCK','EN_STOCK','STOCKE','STOCKEE','FRIGO') OR storage_at IS NOT NULL THEN 'Stock / conservation'
             WHEN UPPER(COALESCE(statut,'')) IN ('PRET','PRETE','VALIDE','VALIDÉ') THEN 'Prêt / validé'
@@ -5600,87 +5604,6 @@ app.post('/api/lc-workflow/pots/:id/stock', async (req, res) => {
 });
 
 
-
-// POST /api/lc-workflow/pots/:id/exhausted
-// Operational completion: a refrigerated LC pot has been fully used.
-// The pot is archived using the same lc_deletion_history table as deleted LC pots, with reason "Épuisé".
-app.post('/api/lc-workflow/pots/:id/exhausted', async (req, res) => {
-  if (!['admin','operator'].includes(String(req.adminSession?.role || ''))) {
-    return res.status(403).json({ error: 'Ce rôle ne peut pas marquer un pot LC comme épuisé.' });
-  }
-
-  const potId = Number(req.params.id);
-  if (!potId) return res.status(400).json({ error: 'Pot LC invalide.' });
-
-  await ensureLcDeletionWorkflowSchema();
-  await ensureLcPotWorkflowSchema();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const target = await loadLcDeletionTarget(client, 'pot', potId, true);
-    if (!target) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Pot LC introuvable ou déjà retiré.' });
-    }
-
-    const stored = target.row.fridge_stored === true || String(target.row.fridge_stored || '').toLowerCase() === 'true' || !!target.row.fridge_stored_at;
-    if (!stored) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Seuls les pots LC avec le statut Frigo / stocké peuvent être marqués Épuisé.' });
-    }
-
-    const actorName = req.adminSession?.username || 'Utilisateur';
-    const actorRole = req.adminSession?.role || 'operator';
-    const now = new Date();
-    const deletion = await executeLcDeletion(client, target);
-
-    await insertLcDeletionHistory(client, {
-      target,
-      reason: 'Épuisé',
-      requestedBy: req.adminSession?.userId || null,
-      requestedByName: actorName,
-      requestedByRole: actorRole,
-      requestedAt: now,
-      approvedBy: req.adminSession?.userId || null,
-      approvedByName: actorName,
-      approvedAt: now,
-      deletionMode: actorRole === 'admin' ? 'admin_direct' : 'operator_approved',
-      contextData: {
-        completion_status: 'Épuisé',
-        completion_type: 'fully_used',
-        previous_status: target.row.status || null,
-        fridge_stored: true,
-        fridge_stored_at: target.row.fridge_stored_at || null,
-        fridge_expiry_date: target.row.fridge_expiry_date || null
-      },
-      originalData: deletion.originalData
-    });
-
-    await client.query(`
-      UPDATE lc_deletion_requests
-         SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),
-             review_note=COALESCE(NULLIF(review_note,''),'Épuisé — pot entièrement utilisé')
-       WHERE lc_pot_id=$1 AND resource_type='pot' AND status='pending'
-    `, [potId, req.adminSession?.userId || null, actorName]);
-
-    await client.query('COMMIT');
-    await recordProductionActivity(req, {
-      module: 'lc',
-      actionType: 'modified',
-      itemId: potId,
-      itemLabel: target.potCode || `Pot LC ${potId}`,
-      details: { completion_status: 'Épuisé', archived: true, lot_id: target.lcLotId }
-    });
-    return res.json({ success: true, status: 'Épuisé', archived: true, deleted_id: deletion.deleted_id });
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error('POST /api/lc-workflow/pots/:id/exhausted', e);
-    return res.status(500).json({ error: e.message });
-  } finally {
-    client.release();
-  }
-});
-
 app.post('/api/lc-workflow/lots/:id/upload-photo', lcUpload.single('photo'), async (req, res) => {
   try {
     await ensureLcPotWorkflowSchema();
@@ -5778,6 +5701,8 @@ async function ensureGrainWorkflowSchema() {
       storage_location TEXT,
       storage_note TEXT,
       storage_operator TEXT,
+      sold_at TIMESTAMP WITH TIME ZONE,
+      sold_by TEXT,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
       UNIQUE(batch_id, unit_number)
@@ -5860,6 +5785,8 @@ async function ensureGrainWorkflowSchema() {
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_location TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_note TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS storage_operator TEXT`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS sold_at TIMESTAMP WITH TIME ZONE`);
+  await realPool.query(`ALTER TABLE myc_grain_units ADD COLUMN IF NOT EXISTS sold_by TEXT`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ALTER COLUMN lc_lot_id DROP NOT NULL`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS inoculation_source_type TEXT DEFAULT 'LC'`);
   await realPool.query(`ALTER TABLE myc_grain_inoculations ADD COLUMN IF NOT EXISTS source_grain_unit_id BIGINT`);
@@ -6209,6 +6136,7 @@ app.get('/api/grain-units', async (req, res) => {
     let where = [];
     if (batchId) { params.push(batchId); where.push(`u.batch_id=$${params.length}`); }
     if (status) { params.push(status); where.push(`u.statut=$${params.length}`); }
+    else { where.push(`UPPER(BTRIM(COALESCE(u.statut,''))) <> 'VENDU'`); }
 
     const r = await pool.query(`
       SELECT u.*,
@@ -6347,6 +6275,49 @@ app.get('/api/grain-units/:id/summary', async (req, res) => {
     });
   } catch (e) {
     console.error('GET /api/grain-units/:id/summary', e);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/grain-units/:id/sold
+// Marks a ready grain pot/bag as sold. Sold units remain in PostgreSQL for traceability
+// but are excluded from the default active grain-unit list.
+app.post('/api/grain-units/:id/sold', async (req, res) => {
+  try {
+    await ensureGrainWorkflowSchema();
+    const unitId = Number(req.params.id || 0);
+    if (!unitId) return res.status(400).json({ error: 'id pot/sac invalide' });
+
+    const soldBy = String(req.adminSession?.username || 'Utilisateur').trim();
+    const updated = await pool.query(`
+      UPDATE myc_grain_units
+         SET statut='VENDU', sold_at=now(), sold_by=$2, updated_at=now()
+       WHERE id=$1
+         AND UPPER(BTRIM(COALESCE(statut,'')))='PRET'
+       RETURNING *
+    `, [unitId, soldBy]);
+
+    if (!updated.rows.length) {
+      const current = await pool.query(`SELECT id,code,statut FROM myc_grain_units WHERE id=$1 LIMIT 1`, [unitId]);
+      if (!current.rows.length) return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
+      return res.status(409).json({ error: `Le pot/sac doit être au statut PRET avant la vente. Statut actuel : ${current.rows[0].statut || '—'}.` });
+    }
+
+    await recordProductionActivity(req, {
+      module: 'grain',
+      actionType: 'modified',
+      itemId: unitId,
+      itemLabel: updated.rows[0].code || `Grain unité ${unitId}`,
+      details: { action: 'sold', previous_status: 'PRET', new_status: 'VENDU' }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Pot/sac grain marqué comme vendu.',
+      unit: updated.rows[0]
+    });
+  } catch (e) {
+    console.error('POST /api/grain-units/:id/sold', e);
     return res.status(500).json({ error: e.message });
   }
 });
@@ -7507,94 +7478,6 @@ app.post("/api/petris/:id/stock-frigo", handleStockFrigo);
 app.put("/api/petris/:id/stock-frigo", handleStockFrigo);
 app.post("/api/petris/:id/conservation-frigorifique", handleStockFrigo);
 app.put("/api/petris/:id/conservation-frigorifique", handleStockFrigo);
-
-
-// POST /api/petris/:id/exhausted
-// Operational completion: a refrigerated Petri dish has been fully used.
-// It is removed from active/stock lists and archived in the existing deletion history with reason "Épuisé".
-app.post('/api/petris/:id/exhausted', async (req, res) => {
-  if (!['admin','operator'].includes(String(req.adminSession?.role || ''))) {
-    return res.status(403).json({ error: 'Ce rôle ne peut pas marquer une boîte comme épuisée.' });
-  }
-
-  const petriId = Number(req.params.id);
-  if (!petriId) return res.status(400).json({ error: 'ID Petri invalide.' });
-
-  await ensurePetriDeletionWorkflowSchema();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const found = await client.query(`
-      SELECT id,isolement_id,parent_id,phase,j0,status,gelose_id,created_at,
-             storage_at,storage_limit_at,deleted_at,deleted_reason
-      FROM iso_petris
-      WHERE id=$1
-      FOR UPDATE
-    `, [petriId]);
-
-    if (!found.rows.length || found.rows[0].deleted_at) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Boîte de Petri introuvable ou déjà retirée.' });
-    }
-
-    const petri = found.rows[0];
-    const stored = !!petri.storage_at || ['STOCK_FRIGO','CONSERVATION_FRIGORIFIQUE','STOCK','CONSERVATION'].includes(String(petri.status || '').toUpperCase());
-    if (!stored) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'La boîte doit être en conservation frigorifique avant de pouvoir être marquée Épuisé.' });
-    }
-
-    const actorName = req.adminSession?.username || 'Utilisateur';
-    const actorRole = req.adminSession?.role || 'operator';
-    const now = new Date();
-    const petriCode = `P${petri.phase || '—'} ID ${petri.id}`;
-
-    await insertPetriDeletionHistory(client, {
-      petri,
-      petriCode,
-      reason: 'Épuisé',
-      requestedBy: req.adminSession?.userId || null,
-      requestedByName: actorName,
-      requestedByRole: actorRole,
-      requestedAt: now,
-      approvedBy: req.adminSession?.userId || null,
-      approvedByName: actorName,
-      approvedAt: now,
-      deletionMode: actorRole === 'admin' ? 'admin_direct' : 'operator_approved',
-      contextData: {
-        completion_status: 'Épuisé',
-        completion_type: 'fully_used',
-        previous_status: petri.status || null,
-        storage_at: petri.storage_at || null,
-        storage_limit_at: petri.storage_limit_at || null
-      }
-    });
-
-    const deleted = await executePetriSoftDeletion(client, petri, 'Épuisé');
-    await client.query(`
-      UPDATE petri_deletion_requests
-         SET status='cancelled',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),
-             review_note=COALESCE(NULLIF(review_note,''),'Épuisé — boîte entièrement utilisée')
-       WHERE petri_id=$1 AND status='pending'
-    `, [petriId, req.adminSession?.userId || null, actorName]);
-
-    await client.query('COMMIT');
-    await recordProductionActivity(req, {
-      module: 'petri',
-      actionType: 'modified',
-      itemId: petriId,
-      itemLabel: petriCode,
-      details: { completion_status: 'Épuisé', archived: true }
-    });
-    return res.json({ success: true, status: 'Épuisé', archived: true, petri: deleted });
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error('POST /api/petris/:id/exhausted', e);
-    return res.status(500).json({ error: e.message });
-  } finally {
-    client.release();
-  }
-});
 
 // POST /api/petris/:id/deletion-request
 // Operateur: demande d'approbation. Admin: suppression immediate.

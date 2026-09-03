@@ -84,7 +84,9 @@
     .grain-actions-menu[open] summary{border-color:#9bcbaa;background:#f0faf3;color:var(--green-dark)}
     .grain-actions-popover{position:absolute;right:0;top:35px;z-index:40;min-width:150px;background:#fff;border:1px solid #dbe3de;border-radius:10px;box-shadow:0 12px 30px rgba(20,45,28,.16);padding:6px}
     .grain-actions-popover button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:8px 9px;border-radius:7px;font-size:11px;font-weight:800;color:#35433a;cursor:pointer}
-    .grain-actions-popover button:hover{background:#f1f7f3}
+    .grain-actions-popover button:hover:not(:disabled){background:#f1f7f3}
+    .grain-actions-popover button:disabled{color:#9aa49e;cursor:not-allowed;opacity:.55;background:transparent}
+    .grain-actions-popover button.grain-sold-action:not(:disabled){color:#8a5a18}
     .grain-actions-popover button.danger{color:#b42318}
     .grain-history-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px}
     .grain-history-pagination-info{font-size:11px;color:#667085;font-weight:700}
@@ -223,16 +225,20 @@
     @media(max-width:900px){.grain-card-titlebar{align-items:flex-start}.grain-export-menu{margin-left:auto}.grain-header-popover{min-width:190px}}
 
   </style>
-
-<style id="mtd-shell-prepaint-guard">
-  html.mtd-shell-loading .admin-big-logo,
-  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
-</style>
-<script>document.documentElement.classList.add('mtd-shell-loading');</script>
-
 </head>
 <body>
-<section class="section section-md admin-wrapper">
+<div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro"></div>
+
+  <div class="admin-menu-bar">
+    <a href="admin.html">Tableau de bord</a>
+    <a href="admin-taches.html">Tâches obligatoires</a>
+    <a href="admin-souches.html">Souches</a>
+    <a href="admin-isolement.html">Isolement tissulaire</a>
+    <a href="admin-myc-liquide.html">Mycélium liquide</a>
+    <a href="admin-myc-grain.html" class="active">Mycélium sur grain</a>
+  </div>
+
+  <section class="section section-md admin-wrapper">
     <div class="container">
       <h3 class="text-capitalize mb-4 text-center">Gestion du <span style="color:var(--green);">Mycélium sur grain</span></h3>
 
@@ -641,7 +647,7 @@
       if(['EN_STOCK','STOCKE','STOCKEE','FRIGO'].includes(key))return 'STOCK';
       return key;
     }
-    function statusBadge(st){st=canonicalGrainStatus(st); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='PARTIELLEMENT_ENSEMENCE')return '<span class="badge-pill warn">Partiellement ensemencé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK')return '<span class="badge-pill ok">Stocké</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; if(st==='SUPPRIME')return '<span class="badge-pill muted">Supprimé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
+    function statusBadge(st){st=canonicalGrainStatus(st); if(st==='PREPARE')return '<span class="badge-pill info">Préparé</span>'; if(st==='PARTIELLEMENT_ENSEMENCE')return '<span class="badge-pill warn">Partiellement ensemencé</span>'; if(st==='ENSEMENCE')return '<span class="badge-pill warn">Ensemencé</span>'; if(st==='EN_INCUBATION')return '<span class="badge-pill purple">Incubation</span>'; if(st==='PRET')return '<span class="badge-pill ok">Prêt</span>'; if(st==='STOCK')return '<span class="badge-pill ok">Stocké</span>'; if(st==='VENDU')return '<span class="badge-pill muted">Vendu</span>'; if(st==='CONTAMINE')return '<span class="badge-pill bad">Contaminé</span>'; if(st==='SUPPRIME')return '<span class="badge-pill muted">Supprimé</span>'; return '<span class="badge-pill muted">'+esc(st||'—')+'</span>'}
     function apiErrorMessage(e){return e && e.message ? e.message : 'Erreur API inconnue'}
     async function parseApiResponse(r,path){
       const text=await r.text();
@@ -785,6 +791,24 @@
     window.printCurrentGrainLabels=function(){const lc=selectedLcFromSelect('main-lc-select');let list=filteredUnits();if(lc){list=list.filter(u=>Number(u.lc_lot_id||0)===Number(lc.lc_lot_id)&&(!lc.lc_pot_id||Number(u.lc_pot_id||0)===Number(lc.lc_pot_id)));}if(!list.length)return alert('Aucun pot/sac à imprimer pour cette isolation.');printGrainUnitLabels(list);}
     window.printInoculationLabels=function(key){const list=filteredUnits().filter(u=>isInoculatedUnit(u)&&unitLcGroupKey(u)===String(key));if(!list.length)return alert('Aucun sac/pot trouvé pour cette LC.');printGrainUnitLabels(list);}
     window.stockUnit=function(id){const u=units.find(x=>Number(x.id)===Number(id));if(!u)return alert('Pot/sac introuvable.');const location=prompt('Emplacement stock / frigo / étagère pour '+u.code+' :','Stock grain');if(location===null)return;const note=prompt('Note de stockage (optionnel) :','');postJSON(`/api/grain-units/${id}/stock`,{storage_location:location,storage_note:note||''}).then(async()=>{alert('✅ Pot/sac mis au stock. Le QR ouvrira maintenant le résumé.');await loadAll(false);await openSummaryForUnit(id,false);}).catch(e=>alert('❌ '+apiErrorMessage(e)));}
+    window.markGrainUnitSold=async function(id){
+      const u=units.find(x=>Number(x.id)===Number(id));
+      if(!u)return alert('Pot/sac introuvable.');
+      if(canonicalGrainStatus(u.statut)!=='PRET')return alert('Le pot/sac doit être au statut Prêt avant de pouvoir être marqué Vendu.');
+      if(!confirm(`Marquer ${u.code||('Grain #'+id)} comme Vendu ?
+
+Le pot/sac sera retiré de la liste active, mais restera conservé dans la base avec le statut VENDU.`))return;
+      try{
+        const data=await postJSON(`/api/grain-units/${id}/sold`,{});
+        units=units.filter(x=>Number(x.id)!==Number(id));
+        syncGrainSourceSelect();
+        renderStats();
+        renderUnits();
+        renderPreparedUnits();
+        alert('✅ Pot/sac marqué Vendu et retiré de la liste active.');
+        return data;
+      }catch(e){alert('❌ '+apiErrorMessage(e));}
+    };
     window.openSummaryForUnit=async function(id,fromQr=false){showPanel('panel-summary');const box=$('grain-summary-container');if(box)box.innerHTML='<div class="loading">Chargement du résumé...</div>';try{const data=await getJSON(`/api/grain-units/${id}/summary`);renderGrainSummary(data,fromQr);setTimeout(()=>$('panel-summary')?.scrollIntoView({behavior:'smooth',block:'start'}),60);}catch(e){if(box)box.innerHTML='<div class="alert-box alert-red">Erreur résumé : '+esc(apiErrorMessage(e))+'</div>';}}
     function renderGrainSummary(data,fromQr=false){
       const box=$('grain-summary-container');if(!box)return;
@@ -1141,6 +1165,8 @@
           const stockAction=isUnitStored(u)
             ?`<button type="button" onclick="event.stopPropagation();openSummaryForUnit(${id});this.closest('details').removeAttribute('open')">📦 Résumé</button>`
             :`<button type="button" onclick="event.stopPropagation();stockUnit(${id});this.closest('details').removeAttribute('open')">📦 Stockage</button>`;
+          const canSell=canonicalGrainStatus(u.statut)==='PRET';
+          const soldAction=`<button type="button" class="grain-sold-action" ${canSell?'': 'disabled title="Disponible uniquement lorsque le statut est Prêt"'} onclick="event.stopPropagation();markGrainUnitSold(${id});this.closest('details').removeAttribute('open')">💶 Vendu</button>`;
           const deleteAction=['admin','operator'].includes(String(window.currentAdminRole||'').toLowerCase())
             ?`<button type="button" class="danger" onclick="event.stopPropagation();deleteGrainUnit(${id});this.closest('details').removeAttribute('open')">🗑️ Supprimer</button>`:'';
           return `<tr class="grain-unit-row-line">
@@ -1151,7 +1177,7 @@
             <td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td>
             <td><strong>${propagation}</strong><div class="grain-small">${score}</div></td>
             <td>${statusBadge(u.statut)}</td>
-            <td style="overflow:visible"><details class="grain-actions-menu" onclick="event.stopPropagation()"><summary aria-label="Actions">⋯</summary><div class="grain-actions-popover"><button type="button" onclick="openJournalForUnit(${id});this.closest('details').removeAttribute('open')">📒 Journal</button>${stockAction}<button type="button" onclick="printGrainUnitLabelsById(${id});this.closest('details').removeAttribute('open')">🏷️ Étiquette</button>${deleteAction}</div></details></td>
+            <td style="overflow:visible"><details class="grain-actions-menu" onclick="event.stopPropagation()"><summary aria-label="Actions">⋯</summary><div class="grain-actions-popover"><button type="button" onclick="openJournalForUnit(${id});this.closest('details').removeAttribute('open')">📒 Journal</button>${stockAction}<button type="button" onclick="printGrainUnitLabelsById(${id});this.closest('details').removeAttribute('open')">🏷️ Étiquette</button>${soldAction}${deleteAction}</div></details></td>
           </tr>
           <tr class="grain-history-detail-row" id="grain-history-detail-${id}"><td colspan="8"><div class="grain-history-detail-grid">
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Lot complet</div><div class="grain-history-detail-value">${esc(u.code)}</div></div>
