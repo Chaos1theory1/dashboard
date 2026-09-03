@@ -218,6 +218,13 @@
       border-radius: 8px;
     }
   </style>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 
 <body>
@@ -248,26 +255,13 @@
 <!-- Contenu principal -->
   <section class="section section-lg bg-default admin-wrapper">
     <div class="container">
-      <div class="admin-big-logo">
-        <img src="images/logo.png" alt="BaslyAgro.Biotech Logo" />
-      </div>
-      
-      <h1 style="text-align: center; color: #222; margin-bottom: 10px;">Journal Souche Interne</h1>
+<h1 style="text-align: center; color: #222; margin-bottom: 10px;">Journal Souche Interne</h1>
       <p style="text-align: center; color: #666; margin-bottom: 30px;">
         Suivi du cycle biologique et manipulations • Stockage frigorifique 2-4°C
       </p>
       
       <!-- Menu admin -->
-      <div class="admin-menu-bar">
-    <a href="admin.html">Tableau de bord</a>
-        <a href="admin-taches.html">TÂCHES OBLIGATOIRES</a>
-        <a href="admin-souches.html" class="active">SOUCHES</a>
-        <a href="admin-isolement.html">ISOLEMENT TISSULAIRE</a>
-        <a href="admin-myc-liquide.html">MYCÉLIUM LIQUIDE</a>
-        <a href="admin-myc-grain.html">MYCÉLIUM SUR GRAIN</a>
-      </div>
-
-      <div class="row">
+<div class="row">
         <div class="col-12">
           <!-- Info générale de la souche -->
           <div class="admin-card">

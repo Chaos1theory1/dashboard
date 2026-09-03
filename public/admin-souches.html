@@ -726,6 +726,13 @@
     .strain-pending-badge{display:inline-flex;align-items:center;padding:6px 9px;border-radius:8px;background:#fff3cd;color:#856404;font-size:11px;font-weight:800}
     @media(max-width:700px){.strain-edit-grid{grid-template-columns:1fr}}
   </style>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 
 <body>
@@ -787,21 +794,8 @@
   </script>
 
   <!-- GRAND LOGO CENTRÉ -->
-  <div class="admin-big-logo">
-    <img src="images/logo.png" alt="BaslyAgro.Biotech">
-  </div>
-
-  <!-- MENU ADMIN INTERNE -->
-  <div class="admin-menu-bar">
-    <a href="admin.html">Tableau de bord</a>
-    <a href="admin-taches.html">Tâches obligatoires</a>
-    <a href="admin-souches.html" class="active">Souches</a>
-    <a href="admin-isolement.html">Isolement tissulaire</a>
-    <a href="admin-myc-liquide.html">Mycélium liquide</a>
-    <a href="admin-myc-grain.html">Mycélium sur grain</a>
-  </div>
-
-  <!-- CONTENU ADMIN -->
+<!-- MENU ADMIN INTERNE -->
+<!-- CONTENU ADMIN -->
   <section class="section section-md admin-wrapper">
     <div class="container">
       <h3 class="text-capitalize mb-4 text-center">

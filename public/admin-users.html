@@ -24,15 +24,19 @@
     @media(max-width:1050px){.mtd-user-overview{grid-template-columns:repeat(2,minmax(150px,1fr))}.mtd-user-toolbar{grid-template-columns:1fr 1fr}.mtd-users-table-wrap{overflow-x:auto}.mtd-users-footer{grid-template-columns:1fr}.mtd-users-range,.mtd-page-size{justify-self:center}.activity-filters{grid-template-columns:1fr 1fr}}
     @media(max-width:650px){.mtd-user-overview,.mtd-user-toolbar,.mtd-user-form-grid,.activity-filters,.metrics{grid-template-columns:1fr}.mtd-user-form-grid .full{grid-column:auto}.mtd-users-workspace{padding:13px}.mtd-user-modal-backdrop{padding:10px}.mtd-users-table{min-width:850px}.mtd-users-footer{display:flex;flex-direction:column}.mtd-page-size{justify-self:auto}}
   </style>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 <body>
   <script src="js/mtd-api-cache.js"></script>
 <script src="js/mtd-heartbeat-guard.js"></script>
 <script src="js/admin-auth.js"></script>
-  <div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro"></div>
-  <div class="admin-menu-bar"><a href="admin.html">Tableau de bord</a><a href="admin-taches.html">Tâches obligatoires</a><a href="admin-souches.html">Souches</a><a href="admin-isolement.html">Isolement tissulaire</a><a href="admin-myc-liquide.html">Mycélium liquide</a><a href="admin-myc-grain.html">Mycélium sur grain</a></div>
-
-  <main class="wrap mtd-users-admin-page">
+<main class="wrap mtd-users-admin-page">
     <h1>Gestion des utilisateurs</h1>
 
     <section class="mtd-user-overview" aria-label="Résumé utilisateurs">

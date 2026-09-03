@@ -761,6 +761,13 @@
     }
 
   </style>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 
 <body>
@@ -815,21 +822,7 @@
       });
     });
   </script>
-
-  <div class="admin-big-logo">
-    <img src="images/logo.png" alt="BaslyAgro" />
-  </div>
-
-  <div class="admin-menu-bar">
-    <a href="admin.html">Tableau de bord</a>
-    <a href="admin-taches.html">Tâches obligatoires</a>
-    <a href="admin-souches.html">Souches</a>
-    <a class="active" href="admin-isolement.html">Isolement tissulaire</a>
-    <a href="admin-myc-liquide.html">Mycélium liquide</a>
-    <a href="admin-myc-grain.html">Mycélium sur grain</a>
-  </div>
-
-  <section class="section section-md admin-wrapper">
+<section class="section section-md admin-wrapper">
     <div class="container">
       <h3 class="text-capitalize mb-4 text-center">
         Gestion de l'<span style="color: var(--baslyagro-green);">Isolement tissulaire</span>

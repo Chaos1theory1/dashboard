@@ -30,19 +30,16 @@
     .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.summary-item{background:#f8fbff;border:1px solid #e4eefb;border-radius:10px;padding:12px}.summary-label{font-size:11px;text-transform:uppercase;color:#666;font-weight:900}.summary-value{font-size:15px;font-weight:900;color:#222;margin-top:4px}.page-qr-box{background:rgba(255,255,255,.96);border:1px solid #d6e8ff;border-left:5px solid var(--blue);border-radius:12px;padding:12px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 18px rgba(0,0,0,.10);margin:10px 0 16px}.page-qr-box img{width:96px;height:96px;border:1px solid #ddd;border-radius:8px;background:#fff;padding:4px}.page-qr-title{font-weight:900;color:#21618c;margin-bottom:4px}.page-qr-text{font-size:12px;line-height:1.35;color:#333}.stock-note{background:#fff9e6;border-left:5px solid #ffc107;border-radius:10px;padding:12px;margin-top:12px;font-size:13px}
     .loading{text-align:center;padding:28px;color:#777;font-weight:800}@media(max-width:767px){.admin-card{padding:16px}.admin-menu-bar a{display:inline-block;margin:6px}.images-grid{grid-template-columns:1fr}.page-qr-box{align-items:flex-start}.page-qr-box img{width:78px;height:78px}}
   </style>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 <body>
-<div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro"></div>
-  <div class="admin-menu-bar">
-    <a href="admin.html">Tableau de bord</a>
-    <a href="admin-taches.html">Tâches obligatoires</a>
-    <a href="admin-souches.html">Souches</a>
-    <a href="admin-isolement.html">Isolement tissulaire</a>
-    <a href="admin-myc-liquide.html">Mycélium liquide</a>
-    <a href="admin-myc-grain.html" class="active">Mycélium sur grain</a>
-  </div>
-
-  <section class="section section-md admin-wrapper">
+<section class="section section-md admin-wrapper">
     <div class="container">
       <h3 class="text-capitalize mb-4 text-center">Journal du <span style="color:var(--green);">Mycélium sur grain</span></h3>
 

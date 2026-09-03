@@ -81,20 +81,16 @@
 <script src="js/mtd-heartbeat-guard.js"></script>
 <script src="js/admin-auth.js"></script>
   <script>requireAdminAuth();</script>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 <body>
-  <div class="admin-big-logo"><img src="images/logo.png" alt="Mycelium Tech Digital"></div>
-
-  <div class="admin-menu-bar">
-    <a href="admin.html">Tableau de bord</a>
-    <a class="active" href="admin-taches.html">Tâches obligatoires</a>
-    <a href="admin-souches.html">Souches</a>
-    <a href="admin-isolement.html">Isolement tissulaire</a>
-    <a href="admin-myc-liquide.html">Mycélium liquide</a>
-    <a href="admin-myc-grain.html">Mycélium sur grain</a>
-  </div>
-
-  <section class="section admin-wrapper">
+<section class="section admin-wrapper">
     <div class="container">
       <h3 class="page-title">Tâches <span class="text-primary">obligatoires</span></h3>
       <p class="page-subtitle">

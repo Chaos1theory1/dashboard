@@ -56,6 +56,7 @@
   function build(){
     if(document.getElementById('mtd-dashboard-shell'))return;
     document.body.classList.add('mtd-dashboard-shell');
+  document.documentElement.classList.remove('mtd-shell-loading');
 
     const overlay=document.createElement('div');
     overlay.className='mtd-shell-overlay';overlay.id='mtd-shell-overlay';

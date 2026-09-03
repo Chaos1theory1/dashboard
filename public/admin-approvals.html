@@ -24,15 +24,19 @@
     @media(max-width:1050px){.approval-stats{grid-template-columns:repeat(2,minmax(150px,1fr))}.approval-filters{grid-template-columns:1fr}.approval-detail-grid,.cert-grid{grid-template-columns:1fr 1fr}}
     @media(max-width:650px){.approval-stats,.approval-detail-grid,.cert-grid{grid-template-columns:1fr}.approval-pagination{align-items:flex-start;flex-direction:column}.approval-table{min-width:900px}}
   </style>
+
+<style id="mtd-shell-prepaint-guard">
+  html.mtd-shell-loading .admin-big-logo,
+  html.mtd-shell-loading .admin-menu-bar { display:none !important; }
+</style>
+<script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
 </head>
 <body>
   <script src="js/mtd-api-cache.js"></script>
 <script src="js/mtd-heartbeat-guard.js"></script>
 <script src="js/admin-auth.js"></script>
-  <div class="admin-big-logo"><img src="images/logo.png" alt="BiotechAgro"></div>
-  <div class="admin-menu-bar"><a href="admin.html">Tableau de bord</a><a href="admin-users.html">Utilisateurs</a><a href="admin-taches.html">Tâches obligatoires</a><a href="admin-souches.html">Souches</a><a href="admin-isolement.html">Isolement tissulaire</a><a href="admin-myc-liquide.html">Mycélium liquide</a><a href="admin-myc-grain.html">Mycélium sur grain</a></div>
-
-  <main class="approvals-wrap">
+<main class="approvals-wrap">
     <h1 class="legacy-title">Demandes d’approbation</h1>
 
     <section class="approval-stats" aria-label="Résumé des demandes">
