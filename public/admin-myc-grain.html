@@ -224,6 +224,20 @@
     .grain-batch-source small{display:block;color:#748078;margin-top:1px;font-size:9px}
     @media(max-width:900px){.grain-card-titlebar{align-items:flex-start}.grain-export-menu{margin-left:auto}.grain-header-popover{min-width:190px}}
 
+    /* === SCANNER QR GRAIN - même logique que LC / isolement === */
+    .grain-scan-inline-card{
+      width:100%;box-sizing:border-box;margin:0 0 22px;background:#fff;border-radius:18px;
+      padding:22px;box-shadow:0 8px 24px rgba(0,0,0,.12);border-left:6px solid var(--green);
+    }
+    .grain-scan-inline-card h2{margin:0 0 10px;color:var(--green-dark);font-size:24px;font-weight:900}
+    .grain-scan-inline-card p{margin:0 0 14px;color:#58645c;font-size:14px;line-height:1.45}
+    .grain-scan-inline-input{width:100%!important;box-sizing:border-box!important;border:1px solid #ccd7cf!important;border-radius:11px!important;padding:12px 14px!important;font-size:14px!important;margin:0 0 11px!important;background:#fff!important}
+    .grain-scan-inline-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .grain-scan-inline-btn{width:100%;min-height:45px;border:0;border-radius:10px;padding:11px 14px;font-size:13px;font-weight:900;cursor:pointer;color:#fff;background:var(--green)}
+    .grain-scan-inline-btn.secondary{background:#d9ddda;color:#26342b}.grain-scan-inline-btn.blue{background:#0d6efd}
+    .grain-scan-inline-file{display:none}.grain-scan-inline-msg{min-height:20px;margin-top:10px;font-size:12px;font-weight:800;line-height:1.35;color:var(--red)}
+    @media(max-width:700px){.grain-scan-inline-actions{grid-template-columns:1fr}.grain-scan-inline-card{padding:16px}.grain-scan-inline-card h2{font-size:21px}}
+
   </style>
 </head>
 <body>
@@ -241,6 +255,31 @@
   <section class="section section-md admin-wrapper">
     <div class="container">
       <h3 class="text-capitalize mb-4 text-center">Gestion du <span style="color:var(--green);">Mycélium sur grain</span></h3>
+
+
+      <div class="grain-scan-inline-card" id="grain-scan-inline-card">
+        <h2>📷 Scanner un pot / sac grain</h2>
+        <p>
+          Le QR de l’étiquette grain ouvre directement le journal du pot / sac,
+          ou son résumé lorsqu’il est stocké. Scanne le QR, importe une photo ou colle le lien.
+        </p>
+        <input
+          id="grain-scan-inline-code"
+          class="grain-scan-inline-input"
+          type="text"
+          placeholder="Scanner ou coller le lien QR du pot / sac grain"
+          autocomplete="off"
+        />
+        <div class="grain-scan-inline-actions">
+          <button type="button" class="grain-scan-inline-btn secondary" id="grain-scan-camera-btn">Caméra</button>
+          <label class="grain-scan-inline-btn blue" for="grain-scan-inline-file" style="display:flex;align-items:center;justify-content:center;margin:0!important;">Importer image QR</label>
+          <button type="button" class="grain-scan-inline-btn" id="grain-scan-open-btn">Ouvrir journal grain</button>
+          <input id="grain-scan-inline-file" class="grain-scan-inline-file" type="file" accept="image/*" />
+          <input id="grain-scan-inline-camera-file" class="grain-scan-inline-file" type="file" accept="image/*" capture="environment" />
+        </div>
+        <div id="grain-scan-inline-reader-temp" style="display:none;"></div>
+        <div id="grain-scan-inline-msg" class="grain-scan-inline-msg"></div>
+      </div>
 
       <div class="info-header">
         <h4>📋 Résumé</h4>
@@ -485,6 +524,7 @@
     </div>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="js/mtd-api-cache.js"></script>
@@ -1406,10 +1446,77 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
       finally{submit.disabled=false}
     };
 
+
+    // Scanner QR grain : reprend le même principe que les scanners LC / isolement.
+    function setGrainScanInlineMsg(text,isError=true){
+      const el=$('grain-scan-inline-msg');if(!el)return;
+      el.style.color=isError?'#c0392b':'#1f7a41';el.textContent=text||'';
+    }
+    function normalizeGrainQrValue(value){return String(value||'').trim();}
+    function grainQrDestinationFromValue(value){
+      const code=normalizeGrainQrValue(value);if(!code)return null;
+      try{
+        const obj=JSON.parse(code);
+        if(obj?.url)return grainQrDestinationFromValue(obj.url);
+        const objId=Number(obj?.grain_unit_id||obj?.unit_id||0);
+        if(objId)return grainUnitQrTarget({id:objId},false);
+      }catch(_){}
+      try{
+        const u=new URL(code,window.location.origin);
+        const id=Number(u.searchParams.get('grain_unit_id')||u.searchParams.get('unit_id')||0);
+        if(id)return grainUnitQrTarget({id},false);
+      }catch(_){}
+      if(/^\d+$/.test(code))return grainUnitQrTarget({id:Number(code)},false);
+      const unit=units.find(x=>String(x.code||'').trim().toLowerCase()===code.toLowerCase());
+      if(unit)return grainUnitQrTarget(unit,false);
+      return null;
+    }
+    function openScannedGrainValue(value){
+      const code=normalizeGrainQrValue(value);
+      if(!code){setGrainScanInlineMsg('⚠️ Scanne ou colle le QR du pot / sac grain.');return;}
+      const target=grainQrDestinationFromValue(code);
+      if(!target){setGrainScanInlineMsg('❌ QR grain non reconnu. Utilise le QR de l’étiquette grain, son lien, son ID ou son code.');return;}
+      setGrainScanInlineMsg('QR reconnu. Ouverture du journal…',false);
+      window.location.href=target;
+    }
+    function waitForGrainQrLibraries(timeoutMs=3000){
+      const started=Date.now();return new Promise(resolve=>{(function check(){
+        if(window.jsQR||window.BarcodeDetector||Date.now()-started>timeoutMs){resolve();return;}setTimeout(check,80);
+      })();});
+    }
+    function loadGrainImageFromFile(file){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Image illisible'));img.src=URL.createObjectURL(file);});}
+    function drawGrainQrVariant(img,opt={}){
+      const scale=opt.scale||1,rotate=opt.rotate||0,maxSide=2200;let w=img.naturalWidth||img.width,h=img.naturalHeight||img.height;
+      const ratio=Math.min(maxSide/Math.max(w,h),1)*scale;w=Math.max(1,Math.round(w*ratio));h=Math.max(1,Math.round(h*ratio));
+      const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true}),rotated=rotate===90||rotate===270;
+      canvas.width=rotated?h:w;canvas.height=rotated?w:h;ctx.save();
+      if(rotate===90){ctx.translate(canvas.width,0);ctx.rotate(Math.PI/2);}if(rotate===180){ctx.translate(canvas.width,canvas.height);ctx.rotate(Math.PI);}if(rotate===270){ctx.translate(0,canvas.height);ctx.rotate(-Math.PI/2);}ctx.drawImage(img,0,0,w,h);ctx.restore();return {canvas,ctx};
+    }
+    async function decodeGrainQrFromFile(file){
+      await waitForGrainQrLibraries();
+      if('BarcodeDetector' in window){try{const detector=new BarcodeDetector({formats:['qr_code']});const bitmap=await createImageBitmap(file);const codes=await detector.detect(bitmap);if(codes?.[0]?.rawValue)return codes[0].rawValue;}catch(_){}}
+      if(window.jsQR){const img=await loadGrainImageFromFile(file);try{
+        const variants=[{scale:1,rotate:0},{scale:1.4,rotate:0},{scale:2,rotate:0},{scale:1,rotate:90},{scale:1,rotate:180},{scale:1,rotate:270}];
+        for(const opt of variants){const {canvas,ctx}=drawGrainQrVariant(img,opt);let data=ctx.getImageData(0,0,canvas.width,canvas.height);let qr=jsQR(data.data,canvas.width,canvas.height,{inversionAttempts:'attemptBoth'});if(qr?.data)return qr.data;
+          const d=data.data;for(let i=0;i<d.length;i+=4){const gray=(d[i]*.299+d[i+1]*.587+d[i+2]*.114)|0;const v=gray>150?255:0;d[i]=d[i+1]=d[i+2]=v;}qr=jsQR(data.data,canvas.width,canvas.height,{inversionAttempts:'attemptBoth'});if(qr?.data)return qr.data;}
+      }finally{try{URL.revokeObjectURL(img.src);}catch(_){}}}
+      throw new Error('Aucun QR détecté. Reprends une photo plus nette, bien cadrée, ou colle le lien du QR.');
+    }
+    async function handleGrainQrFileInput(input){
+      const file=input?.files?.[0];if(!file)return;setGrainScanInlineMsg('Lecture du QR…',false);
+      try{const value=await decodeGrainQrFromFile(file);const box=$('grain-scan-inline-code');if(box)box.value=value;openScannedGrainValue(value);}catch(e){setGrainScanInlineMsg('❌ '+(e.message||'Lecture QR impossible'));}finally{input.value='';}
+    }
+
     async function loadAll(renderPanels=true){try{const results=await Promise.allSettled([loadValidatedLcs(),loadReadyP3s(),getJSON('/api/grain-batches'),getJSON('/api/grain-units'),getJSON('/api/grain-protocols')]); if(results[0].status==='fulfilled')validLcs=Array.isArray(results[0].value)?results[0].value:[]; else throw results[0].reason; validP3s=results[1].status==='fulfilled'&&Array.isArray(results[1].value)?results[1].value:[]; batches=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[]; units=results[3].status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value:[]; protocols=results[4].status==='fulfilled'?results[4].value:protocols; syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();renderProtocols();if(results[2].status==='rejected'||results[3].status==='rejected'){$('main-message').innerHTML='Les LC validées sont chargées. Pour créer/ensemencer les pots/sacs grain, remplace aussi <strong>server.js</strong> par celui du ZIP puis redémarre Node.';}}catch(e){$('valid-lc-container').innerHTML='<div class="alert-box alert-red">Erreur chargement API : '+esc(apiErrorMessage(e))+'<br>Vérifie que le serveur est lancé et que la base PostgreSQL est accessible.</div>';console.error(e)}}
 
     document.addEventListener('DOMContentLoaded',()=>{
       $('date-preparation').value=today();$('seed-date').value=today();
+
+      $('grain-scan-open-btn')?.addEventListener('click',()=>openScannedGrainValue($('grain-scan-inline-code')?.value||''));
+      $('grain-scan-camera-btn')?.addEventListener('click',()=>{setGrainScanInlineMsg('Ouverture appareil photo... Prends le QR en photo.',false);$('grain-scan-inline-camera-file')?.click();});
+      $('grain-scan-inline-file')?.addEventListener('change',e=>handleGrainQrFileInput(e.currentTarget));
+      $('grain-scan-inline-camera-file')?.addEventListener('change',e=>handleGrainQrFileInput(e.currentTarget));
+      $('grain-scan-inline-code')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();openScannedGrainValue(e.currentTarget.value);}});
       $('grain-delete-upload')?.addEventListener('change',e=>setGrainDeleteEvidence(e.target.files?.[0]||null));
       $('grain-delete-camera')?.addEventListener('change',e=>setGrainDeleteEvidence(e.target.files?.[0]||null));
       $('grain-delete-modal')?.addEventListener('click',e=>{if(e.target===e.currentTarget)closeGrainDeleteModal()});
