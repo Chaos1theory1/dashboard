@@ -834,7 +834,7 @@
     window.markGrainUnitSold=async function(id){
       const u=units.find(x=>Number(x.id)===Number(id));
       if(!u)return alert('Pot/sac introuvable.');
-      if(canonicalGrainStatus(u.statut)!=='PRET')return alert('Le pot/sac doit être au statut Prêt avant de pouvoir être marqué Vendu.');
+      if(!['PRET','STOCK'].includes(canonicalGrainStatus(u.statut)))return alert('Le pot/sac doit être au statut Prêt ou Stocké avant de pouvoir être marqué Vendu.');
       if(!confirm(`Marquer ${u.code||('Grain #'+id)} comme Vendu ?
 
 Le pot/sac sera retiré de la liste active, mais restera conservé dans la base avec le statut VENDU.`))return;
@@ -1205,8 +1205,8 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
           const stockAction=isUnitStored(u)
             ?`<button type="button" onclick="event.stopPropagation();openSummaryForUnit(${id});this.closest('details').removeAttribute('open')">📦 Résumé</button>`
             :`<button type="button" onclick="event.stopPropagation();stockUnit(${id});this.closest('details').removeAttribute('open')">📦 Stockage</button>`;
-          const canSell=canonicalGrainStatus(u.statut)==='PRET';
-          const soldAction=`<button type="button" class="grain-sold-action" ${canSell?'': 'disabled title="Disponible uniquement lorsque le statut est Prêt"'} onclick="event.stopPropagation();markGrainUnitSold(${id});this.closest('details').removeAttribute('open')">💶 Vendu</button>`;
+          const canSell=['PRET','STOCK'].includes(canonicalGrainStatus(u.statut));
+          const soldAction=`<button type="button" class="grain-sold-action" ${canSell?'': 'disabled title="Disponible uniquement lorsque le statut est Prêt ou Stocké"'} onclick="event.stopPropagation();markGrainUnitSold(${id});this.closest('details').removeAttribute('open')">💶 Vendu</button>`;
           const deleteAction=['admin','operator'].includes(String(window.currentAdminRole||'').toLowerCase())
             ?`<button type="button" class="danger" onclick="event.stopPropagation();deleteGrainUnit(${id});this.closest('details').removeAttribute('open')">🗑️ Supprimer</button>`:'';
           return `<tr class="grain-unit-row-line">
@@ -1508,6 +1508,13 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
     }
 
     async function loadAll(renderPanels=true){try{const results=await Promise.allSettled([loadValidatedLcs(),loadReadyP3s(),getJSON('/api/grain-batches'),getJSON('/api/grain-units'),getJSON('/api/grain-protocols')]); if(results[0].status==='fulfilled')validLcs=Array.isArray(results[0].value)?results[0].value:[]; else throw results[0].reason; validP3s=results[1].status==='fulfilled'&&Array.isArray(results[1].value)?results[1].value:[]; batches=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[]; units=results[3].status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value:[]; protocols=results[4].status==='fulfilled'?results[4].value:protocols; syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();renderProtocols();if(results[2].status==='rejected'||results[3].status==='rejected'){$('main-message').innerHTML='Les LC validées sont chargées. Pour créer/ensemencer les pots/sacs grain, remplace aussi <strong>server.js</strong> par celui du ZIP puis redémarre Node.';}}catch(e){$('valid-lc-container').innerHTML='<div class="alert-box alert-red">Erreur chargement API : '+esc(apiErrorMessage(e))+'<br>Vérifie que le serveur est lancé et que la base PostgreSQL est accessible.</div>';console.error(e)}}
+
+    // If the user returns from the grain journal with the browser Back button,
+    // the page may be restored from the back/forward cache. Refresh once in that
+    // case so the Résumé counters immediately reflect PRET/STOCK status changes.
+    window.addEventListener('pageshow',(event)=>{
+      if(event.persisted && typeof loadAll==='function') loadAll(false);
+    });
 
     document.addEventListener('DOMContentLoaded',()=>{
       $('date-preparation').value=today();$('seed-date').value=today();

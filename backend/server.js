@@ -6280,8 +6280,8 @@ app.get('/api/grain-units/:id/summary', async (req, res) => {
 });
 
 // POST /api/grain-units/:id/sold
-// Marks a ready grain pot/bag as sold. Sold units remain in PostgreSQL for traceability
-// but are excluded from the default active grain-unit list.
+// Marks a ready OR stored grain pot/bag as sold. Sold units remain in PostgreSQL
+// for traceability but are excluded from the default active grain-unit list.
 app.post('/api/grain-units/:id/sold', async (req, res) => {
   try {
     await ensureGrainWorkflowSchema();
@@ -6290,31 +6290,41 @@ app.post('/api/grain-units/:id/sold', async (req, res) => {
 
     const soldBy = String(req.adminSession?.username || 'Utilisateur').trim();
     const updated = await pool.query(`
-      UPDATE myc_grain_units
+      WITH candidate AS (
+        SELECT id, UPPER(BTRIM(COALESCE(statut,''))) AS previous_status
+          FROM myc_grain_units
+         WHERE id=$1
+           AND UPPER(BTRIM(COALESCE(statut,''))) IN ('PRET','STOCK')
+         FOR UPDATE
+      )
+      UPDATE myc_grain_units AS u
          SET statut='VENDU', sold_at=now(), sold_by=$2, updated_at=now()
-       WHERE id=$1
-         AND UPPER(BTRIM(COALESCE(statut,'')))='PRET'
-       RETURNING *
+        FROM candidate AS c
+       WHERE u.id=c.id
+       RETURNING u.*, c.previous_status
     `, [unitId, soldBy]);
 
     if (!updated.rows.length) {
       const current = await pool.query(`SELECT id,code,statut FROM myc_grain_units WHERE id=$1 LIMIT 1`, [unitId]);
       if (!current.rows.length) return res.status(404).json({ error: 'Pot/sac grain introuvable.' });
-      return res.status(409).json({ error: `Le pot/sac doit être au statut PRET avant la vente. Statut actuel : ${current.rows[0].statut || '—'}.` });
+      return res.status(409).json({ error: `Le pot/sac doit être au statut PRET ou STOCK avant la vente. Statut actuel : ${current.rows[0].statut || '—'}.` });
     }
 
+    const previousStatus = String(updated.rows[0].previous_status || 'PRET');
     await recordProductionActivity(req, {
       module: 'grain',
       actionType: 'modified',
       itemId: unitId,
       itemLabel: updated.rows[0].code || `Grain unité ${unitId}`,
-      details: { action: 'sold', previous_status: 'PRET', new_status: 'VENDU' }
+      details: { action: 'sold', previous_status: previousStatus, new_status: 'VENDU' }
     });
 
+    const unit = { ...updated.rows[0] };
+    delete unit.previous_status;
     return res.json({
       success: true,
       message: 'Pot/sac grain marqué comme vendu.',
-      unit: updated.rows[0]
+      unit
     });
   } catch (e) {
     console.error('POST /api/grain-units/:id/sold', e);
