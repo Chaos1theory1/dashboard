@@ -2081,7 +2081,7 @@
           return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]);
         });
         const payload = String(qrPayload || '').trim();
-        const titre = String(title || 'Biotech.Agro — QR LOCAL');
+        const titre = String(title || 'Mycelium Tech Digital — QR LOCAL');
         const lignes = String(lignesHtml || '');
         const dateTxt = String(dateMiseCulture || '—');
         return `
@@ -2207,7 +2207,7 @@
 </head>
 <body>
   <div class="label">
-    <div class="brand">Biotech.Agro</div>
+    <div class="brand">Mycelium Tech Digital</div>
     ${lignes.join('\n    ')}
     <div class="line"><strong>Date mise en culture :</strong> ${safe(dateMiseCulture)}</div>
     <div class="qrbox">${qrSvgFromText(codeActuel)}</div>
@@ -2279,7 +2279,7 @@
 
           return `
   <div class="label">
-    <div class="brand">Biotech.Agro</div>
+    <div class="brand">Mycelium Tech Digital</div>
     ${buildLineage(p)}
     <div class="line"><strong>Date mise en culture :</strong> ${safe(dateCulture)}</div>
     <div class="qrbox">${qrSvgFromText(makeCode(p))}</div>
@@ -2407,7 +2407,7 @@ ${labels}
 </head>
 <body>
   <div class="label">
-    <div class="brand">Biotech.Agro — CONSERVATION FRIGORIFIQUE</div>
+    <div class="brand">Mycelium Tech Digital — CONSERVATION FRIGORIFIQUE</div>
     <div class="line"><strong>Boîte :</strong> ${safe(code)}</div>
     <div class="line"><strong>Phase :</strong> P${safe(petri.phase || '—')}</div>
     <div class="line"><strong>Date stock :</strong> ${safe(formatStockDateFr(dateStock))}</div>
@@ -2449,7 +2449,7 @@ ${labels}
           "Placer cette boîte en conservation frigorifique ?\n\n" +
           "Date de mise en conservation : " + storageDateClean + "\n" +
           "Une étiquette sera imprimée avec limite d’utilisation.\n" +
-          "Conseil Biotech.Agro : préférence 3 mois, limite max 6 mois si contrôle OK."
+          "Conseil Mycelium Tech Digital : préférence 3 mois, limite max 6 mois si contrôle OK."
         )) {
           return;
         }
