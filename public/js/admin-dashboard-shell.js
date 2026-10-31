@@ -66,7 +66,7 @@
     sidebar.innerHTML=`
       <a class="mtd-shell-brand" href="admin.html">
         <img src="images/logo-agro.jpeg" alt="Mycelium Tech Digital">
-        <span><strong>Biotech Agro</strong><small>ADMINISTRATION</small></span>
+        <span><strong>Mycelium Tech Digital</strong><small>ADMINISTRATION</small></span>
       </a>
       <nav class="mtd-shell-nav">
         ${navSections.map(section=>`<div class="mtd-shell-nav-section"${section.admin?' data-mtd-admin-section hidden':''}>${section.label?`<div class="mtd-shell-nav-label">${section.label}</div>`:''}${section.items.map(([href,icon,label,role])=>{const base=href.split('?')[0];const active=activeNavPage===base;return `<a href="${href}"${active?' class="active"':''}${role?' data-mtd-admin-link hidden':''}>${iconMarkup(icon)}<span>${label}</span>${base==='admin-approvals.html'?'<span class="mtd-nav-count" id="mtd-nav-approval-count" hidden>0</span>':''}</a>`}).join('')}</div>`).join('')}

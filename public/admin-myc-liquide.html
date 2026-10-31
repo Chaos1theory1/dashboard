@@ -1664,7 +1664,7 @@ ${pots.map(p=>{
   let qrTarget=`${getLcPublicBaseUrl()}/admin-lc-cycle.html?lc_id=${encodeURIComponent(lot.id)}&pot_id=${encodeURIComponent(p.id)}&from_qr=1`;
   return `<div class="label">
     <div class="info">
-      <div class="brand">BiotechAgro</div>
+      <div class="brand">Mycelium Tech Digital</div>
       <div class="line">LC Ref : <span class="value">${safe(lot.code||'—')}</span></div>
       <div class="line">ID P3 utilisé : <span class="value">P3-${safe(lot.source_petri_id||'—')}</span></div>
       <div class="line">Pot : <span class="value">${safe(potRef)}</span></div>
@@ -2044,7 +2044,7 @@ function printLcFrigoLabelFromMain(label, lotId, potId){
 </style></head><body>
     <div class="label">
       <div class="info">
-        <div class="brand">BiotechAgro</div>
+        <div class="brand">Mycelium Tech Digital</div>
         <div class="type">❄️ LC FRIGO</div>
         <div class="row big">${esc(label.pot_code||'')}</div>
         <div class="row">Lot : ${esc(label.lot_code||'')}</div>

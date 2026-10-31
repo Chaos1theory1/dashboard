@@ -973,7 +973,7 @@ function printFridgeLabel(label){
     @media print{body{padding:0}.label{page-break-inside:avoid}}
   </style></head><body>
     <div class="label">
-      <div class="brand">BiotechAgro</div>
+      <div class="brand">Mycelium Tech Digital</div>
       <div class="type">❄️ LC FRIGO</div>
       <div class="row big">${esc(label.pot_code||'')}</div>
       <div class="row">Lot : ${esc(label.lot_code||'')}</div>
@@ -1522,7 +1522,7 @@ function printPotLabels(list){
 
 
 
-</style></head><body><div class="sheet">${rows.map(p=>{let n=String(p.pot_number||'').padStart(2,'0');let qrTarget=`${getLcPublicBaseUrl()}/admin-lc-cycle.html?lc_id=${encodeURIComponent(lcData.id)}&pot_id=${encodeURIComponent(p.id)}&from_qr=1`;return `<div class="label"><div><div class="brand">BiotechAgro</div><div class="line">LC Ref : <span class="value">${esc(lcData.code||'—')}</span></div><div class="line">ID P3 utilisé : <span class="value">P3-${esc(lcData.source_petri_id||'—')}</span></div><div class="line">Pot : <span class="value">${esc(p.code||('POT-'+n))}</span></div><div class="line">Date création : <span class="value">${esc(dateCreation)}</span></div></div><div class="qr"><img src="${qrUrl(qrTarget)}"><div class="small">Scanner QR<br>Journal LC</div></div></div>`}).join('')}</div><script>window.onload=function(){setTimeout(function(){window.print();},300)};<\/script></body></html>`;
+</style></head><body><div class="sheet">${rows.map(p=>{let n=String(p.pot_number||'').padStart(2,'0');let qrTarget=`${getLcPublicBaseUrl()}/admin-lc-cycle.html?lc_id=${encodeURIComponent(lcData.id)}&pot_id=${encodeURIComponent(p.id)}&from_qr=1`;return `<div class="label"><div><div class="brand">Mycelium Tech Digital</div><div class="line">LC Ref : <span class="value">${esc(lcData.code||'—')}</span></div><div class="line">ID P3 utilisé : <span class="value">P3-${esc(lcData.source_petri_id||'—')}</span></div><div class="line">Pot : <span class="value">${esc(p.code||('POT-'+n))}</span></div><div class="line">Date création : <span class="value">${esc(dateCreation)}</span></div></div><div class="qr"><img src="${qrUrl(qrTarget)}"><div class="small">Scanner QR<br>Journal LC</div></div></div>`}).join('')}</div><script>window.onload=function(){setTimeout(function(){window.print();},300)};<\/script></body></html>`;
   const w=window.open('','_blank','width=900,height=700');if(!w)return alert('Autorise les popups pour imprimer.');w.document.open();w.document.write(html);w.document.close();
 }
 
