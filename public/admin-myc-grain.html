@@ -260,7 +260,7 @@
           autocomplete="off"
         />
         <div class="grain-scan-inline-actions">
-          <button type="button" class="grain-scan-inline-btn secondary" id="grain-scan-camera-btn">Caméra</button>
+          <button type="button" class="grain-scan-inline-btn secondary" id="grain-scan-camera-btn">Scanner QR</button>
           <label class="grain-scan-inline-btn blue" for="grain-scan-inline-file" style="display:flex;align-items:center;justify-content:center;margin:0!important;">Importer image QR</label>
           <button type="button" class="grain-scan-inline-btn" id="grain-scan-open-btn">Ouvrir journal grain</button>
           <input id="grain-scan-inline-file" class="grain-scan-inline-file" type="file" accept="image/*" />
@@ -513,6 +513,7 @@
     </div>
   </div>
 
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -1496,6 +1497,134 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
       try{const value=await decodeGrainQrFromFile(file);const box=$('grain-scan-inline-code');if(box)box.value=value;openScannedGrainValue(value);}catch(e){setGrainScanInlineMsg('❌ '+(e.message||'Lecture QR impossible'));}finally{input.value='';}
     }
 
+    async function __mtdStartLiveQrScanner(options) {
+      const {
+        readerId,
+        inputId,
+        setMessage,
+        onDecoded,
+        title = "Scanner QR"
+      } = options || {};
+
+      if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+        setMessage("❌ Le scanner caméra nécessite HTTPS.", true);
+        return;
+      }
+      if (!window.Html5Qrcode) {
+        setMessage("❌ Le module de scan QR n'est pas chargé. Recharge la page.", true);
+        return;
+      }
+
+      let overlay = document.getElementById("mtd-live-qr-overlay");
+      if (overlay) overlay.remove();
+
+      overlay = document.createElement("div");
+      overlay.id = "mtd-live-qr-overlay";
+      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:16px;";
+      overlay.innerHTML = `
+        <div style="width:min(520px,100%);background:#fff;border-radius:16px;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+            <strong style="font-size:18px;color:#1f7a41;">${title}</strong>
+            <button type="button" id="mtd-live-qr-close" style="border:0;border-radius:9px;background:#c0392b;color:#fff;padding:8px 12px;font-weight:900;cursor:pointer;">Fermer</button>
+          </div>
+          <div id="${readerId}" style="width:100%;min-height:280px;background:#111;border-radius:12px;overflow:hidden;"></div>
+          <div style="margin-top:10px;color:#555;font-size:12px;line-height:1.4;">
+            Place le QR bien de face dans le cadre. La caméra s'arrête automatiquement dès que le QR est reconnu.
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      const scanner = new Html5Qrcode(readerId, { verbose: false });
+      let finished = false;
+
+      async function stopAndClose() {
+        if (finished) return;
+        finished = true;
+        try {
+          if (scanner.getState && scanner.getState() === 2) await scanner.stop();
+          else {
+            try { await scanner.stop(); } catch (_) {}
+          }
+        } catch (_) {}
+        try { scanner.clear(); } catch (_) {}
+        overlay.remove();
+      }
+
+      document.getElementById("mtd-live-qr-close")?.addEventListener("click", async () => {
+        await stopAndClose();
+        setMessage("Scan QR annulé.", false);
+      });
+
+      try {
+        setMessage("Caméra active — présente le QR devant l'objectif.", false);
+
+        const config = {
+          fps: 12,
+          qrbox: (viewWidth, viewHeight) => {
+            const edge = Math.max(180, Math.min(300, Math.floor(Math.min(viewWidth, viewHeight) * 0.72)));
+            return { width: edge, height: edge };
+          },
+          aspectRatio: 1.3333333333,
+          disableFlip: false
+        };
+
+        const decodedCallback = async (decodedText) => {
+          if (finished || !decodedText) return;
+
+          const input = document.getElementById(inputId);
+          if (input) input.value = decodedText;
+
+          await stopAndClose();
+          setMessage("✅ QR reconnu. Ouverture…", false);
+
+          try {
+            await onDecoded(decodedText);
+          } catch (e) {
+            setMessage("❌ " + (e?.message || "QR reconnu mais impossible à ouvrir."), true);
+          }
+        };
+
+        try {
+          await scanner.start(
+            { facingMode: { exact: "environment" } },
+            config,
+            decodedCallback,
+            () => {}
+          );
+        } catch (_) {
+          await scanner.start(
+            { facingMode: "environment" },
+            config,
+            decodedCallback,
+            () => {}
+          );
+        }
+      } catch (e) {
+        try { scanner.clear(); } catch (_) {}
+        overlay.remove();
+        const msg = String(e?.message || e || "");
+        if (/permission|notallowed|denied/i.test(msg)) {
+          setMessage("❌ Autorise l'accès à la caméra dans le navigateur puis réessaie.", true);
+        } else if (/notfound|device|camera/i.test(msg)) {
+          setMessage("❌ Aucune caméra compatible détectée.", true);
+        } else {
+          setMessage("❌ Impossible de démarrer le scanner QR : " + msg, true);
+        }
+      }
+    }
+
+function startGrainInlineQrCamera(){
+      return __mtdStartLiveQrScanner({
+        readerId: "mtd-live-grain-reader",
+        inputId: "grain-scan-inline-code",
+        setMessage: setGrainScanInlineMsg,
+        title: "Scanner QR — Pot / sac grain",
+        onDecoded: async (decodedText) => {
+          openScannedGrainValue(decodedText);
+        }
+      });
+    }
+
     async function loadAll(renderPanels=true){try{const results=await Promise.allSettled([loadValidatedLcs(),loadReadyP3s(),getJSON('/api/grain-batches'),getJSON('/api/grain-units'),getJSON('/api/grain-protocols')]); if(results[0].status==='fulfilled')validLcs=Array.isArray(results[0].value)?results[0].value:[]; else throw results[0].reason; validP3s=results[1].status==='fulfilled'&&Array.isArray(results[1].value)?results[1].value:[]; batches=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[]; units=results[3].status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value:[]; protocols=results[4].status==='fulfilled'?results[4].value:protocols; syncLcSelects();renderStats();renderValidP3s();renderValidLcs();renderBatches();renderUnits();renderPreparedUnits();renderProtocols();if(results[2].status==='rejected'||results[3].status==='rejected'){$('main-message').innerHTML='Les LC validées sont chargées. Pour créer/ensemencer les pots/sacs grain, remplace aussi <strong>server.js</strong> par celui du ZIP puis redémarre Node.';}}catch(e){$('valid-lc-container').innerHTML='<div class="alert-box alert-red">Erreur chargement API : '+esc(apiErrorMessage(e))+'<br>Vérifie que le serveur est lancé et que la base PostgreSQL est accessible.</div>';console.error(e)}}
 
     // If the user returns from the grain journal with the browser Back button,
@@ -1509,7 +1638,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
       $('date-preparation').value=today();$('seed-date').value=today();
 
       $('grain-scan-open-btn')?.addEventListener('click',()=>openScannedGrainValue($('grain-scan-inline-code')?.value||''));
-      $('grain-scan-camera-btn')?.addEventListener('click',()=>{setGrainScanInlineMsg('Ouverture appareil photo... Prends le QR en photo.',false);$('grain-scan-inline-camera-file')?.click();});
+      $('grain-scan-camera-btn')?.addEventListener('click',startGrainInlineQrCamera);
       $('grain-scan-inline-file')?.addEventListener('change',e=>handleGrainQrFileInput(e.currentTarget));
       $('grain-scan-inline-camera-file')?.addEventListener('change',e=>handleGrainQrFileInput(e.currentTarget));
       $('grain-scan-inline-code')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();openScannedGrainValue(e.currentTarget.value);}});

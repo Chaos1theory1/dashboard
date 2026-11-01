@@ -828,7 +828,7 @@
         Ouvrir journal
       </button>
       <button type="button" class="scan-inline-btn secondary" onclick="startInlineQrCamera()">
-        Caméra
+        Scanner QR
       </button>
       <label class="scan-inline-btn blue" for="scan-inline-file" style="text-align:center;">
         Importer image QR
@@ -3932,15 +3932,132 @@ ${labels}
       }
 
 
-      function startInlineQrCamera() {
-        const cameraInput = document.getElementById("scan-inline-camera-file");
-        if (!cameraInput) {
-          setScanInlineMsg("Champ caméra introuvable. Recharge la page.");
-          return;
-        }
+      async function __mtdStartLiveQrScanner(options) {
+  const {
+    readerId,
+    inputId,
+    setMessage,
+    onDecoded,
+    title = "Scanner QR"
+  } = options || {};
 
-        setScanInlineMsg("Ouverture appareil photo... Prends le QR en photo.", false);
-        cameraInput.click();
+  if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+    setMessage("❌ Le scanner caméra nécessite HTTPS.", true);
+    return;
+  }
+  if (!window.Html5Qrcode) {
+    setMessage("❌ Le module de scan QR n'est pas chargé. Recharge la page.", true);
+    return;
+  }
+
+  let overlay = document.getElementById("mtd-live-qr-overlay");
+  if (overlay) overlay.remove();
+
+  overlay = document.createElement("div");
+  overlay.id = "mtd-live-qr-overlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:16px;";
+  overlay.innerHTML = `
+    <div style="width:min(520px,100%);background:#fff;border-radius:16px;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+        <strong style="font-size:18px;color:#1f7a41;">${title}</strong>
+        <button type="button" id="mtd-live-qr-close" style="border:0;border-radius:9px;background:#c0392b;color:#fff;padding:8px 12px;font-weight:900;cursor:pointer;">Fermer</button>
+      </div>
+      <div id="${readerId}" style="width:100%;min-height:280px;background:#111;border-radius:12px;overflow:hidden;"></div>
+      <div style="margin-top:10px;color:#555;font-size:12px;line-height:1.4;">
+        Place le QR bien de face dans le cadre. La caméra s'arrête automatiquement dès que le QR est reconnu.
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const scanner = new Html5Qrcode(readerId, { verbose: false });
+  let finished = false;
+
+  async function stopAndClose() {
+    if (finished) return;
+    finished = true;
+    try {
+      if (scanner.getState && scanner.getState() === 2) await scanner.stop();
+      else {
+        try { await scanner.stop(); } catch (_) {}
+      }
+    } catch (_) {}
+    try { scanner.clear(); } catch (_) {}
+    overlay.remove();
+  }
+
+  document.getElementById("mtd-live-qr-close")?.addEventListener("click", async () => {
+    await stopAndClose();
+    setMessage("Scan QR annulé.", false);
+  });
+
+  try {
+    setMessage("Caméra active — présente le QR devant l'objectif.", false);
+
+    const config = {
+      fps: 12,
+      qrbox: (viewWidth, viewHeight) => {
+        const edge = Math.max(180, Math.min(300, Math.floor(Math.min(viewWidth, viewHeight) * 0.72)));
+        return { width: edge, height: edge };
+      },
+      aspectRatio: 1.3333333333,
+      disableFlip: false
+    };
+
+    const decodedCallback = async (decodedText) => {
+      if (finished || !decodedText) return;
+
+      const input = document.getElementById(inputId);
+      if (input) input.value = decodedText;
+
+      await stopAndClose();
+      setMessage("✅ QR reconnu. Ouverture…", false);
+
+      try {
+        await onDecoded(decodedText);
+      } catch (e) {
+        setMessage("❌ " + (e?.message || "QR reconnu mais impossible à ouvrir."), true);
+      }
+    };
+
+    try {
+      await scanner.start(
+        { facingMode: { exact: "environment" } },
+        config,
+        decodedCallback,
+        () => {}
+      );
+    } catch (_) {
+      await scanner.start(
+        { facingMode: "environment" },
+        config,
+        decodedCallback,
+        () => {}
+      );
+    }
+  } catch (e) {
+    try { scanner.clear(); } catch (_) {}
+    overlay.remove();
+    const msg = String(e?.message || e || "");
+    if (/permission|notallowed|denied/i.test(msg)) {
+      setMessage("❌ Autorise l'accès à la caméra dans le navigateur puis réessaie.", true);
+    } else if (/notfound|device|camera/i.test(msg)) {
+      setMessage("❌ Aucune caméra compatible détectée.", true);
+    } else {
+      setMessage("❌ Impossible de démarrer le scanner QR : " + msg, true);
+    }
+  }
+}
+
+      function startInlineQrCamera() {
+        return __mtdStartLiveQrScanner({
+          readerId: "mtd-live-petri-reader",
+          inputId: "scan-inline-code",
+          setMessage: setScanInlineMsg,
+          title: "Scanner QR — Boîte de Pétri",
+          onDecoded: async () => {
+            await openScannedBoxInline();
+          }
+        });
       }
 
       function waitForInlineQrLibraries(timeoutMs = 2500) {
