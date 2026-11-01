@@ -653,6 +653,10 @@
                 <div class="info-value" id="species">---</div>
               </div>
               <div class="info-item">
+                <div class="info-label">Champignon / souche</div>
+                <div class="info-value" id="mushroomStrain">---</div>
+              </div>
+              <div class="info-item">
                 <div class="info-label">Cycle</div>
                 <div class="info-value" id="cycle">---</div>
               </div>
@@ -892,7 +896,8 @@
     function updateHeader() {
       document.getElementById('boxTitle').textContent = currentBox.id_boite;
       document.getElementById('boxId').textContent = currentBox.code_boite;
-      document.getElementById('species').textContent = currentBox.espece;
+      document.getElementById('species').textContent = currentBox.espece || '—';
+      document.getElementById('mushroomStrain').textContent = currentBox.champignon || '—';
       document.getElementById('cycle').textContent = `J0 → J${currentCycle.cycleDuration}`;
       document.getElementById('currentDay').textContent = `J${currentBox.jour_actuel}`;
       document.getElementById('optimalWindow').textContent =

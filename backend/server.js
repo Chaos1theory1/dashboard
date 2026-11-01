@@ -7893,9 +7893,12 @@ app.get("/api/journal/:boxId", async (req, res) => {
     // 2) Isolement (on vérifie cohérence si isoId fourni)
     const isolementId = Number(petri.isolement_id);
     const isoRes = await pool.query(
-      `SELECT id, code, champignon, cycle_type, date_prelev
-       FROM isolements
-       WHERE id=$1
+      `SELECT i.id, i.code, i.champignon, i.cycle_type, i.date_prelev, i.espece_id,
+              e.nom_scientifique AS espece_nom_scientifique,
+              e.nom_commun AS espece_nom_commun
+       FROM isolements i
+       LEFT JOIN especes e ON e.id_espece = i.espece_id
+       WHERE i.id=$1
        LIMIT 1`,
       [isolementId]
     );
@@ -8035,7 +8038,13 @@ app.get("/api/journal/:boxId", async (req, res) => {
       phase: Number(petri.phase),
       status: String(petri.status || ""),
       status_calc,
-      espece: String(iso.cycle_type || ""),
+      // Display identity comes from the source isolation linked to this Petri dish.
+      // New rows use isolements.espece_id -> especes.nom_scientifique.
+      // cycle_type remains only as a compatibility fallback for older isolations.
+      espece: String(iso.espece_nom_scientifique || iso.cycle_type || ""),
+      champignon: String(iso.champignon || ""),
+      espece_id: iso.espece_id ? Number(iso.espece_id) : null,
+      espece_nom_commun: String(iso.espece_nom_commun || ""),
       cycle_duree_jours: meta.cycleDuration,
       fenetre_optimale_debut: meta.optimalStart,
       fenetre_optimale_fin: meta.optimalEnd,
