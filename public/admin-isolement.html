@@ -611,6 +611,11 @@
     }
     .scan-inline-btn.blue {
       background: #0d6efd;
+      color: #fff !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      text-align: center !important;
     }
     .scan-inline-msg {
       margin-top: 12px;
@@ -828,9 +833,9 @@
         Ouvrir journal
       </button>
       <button type="button" class="scan-inline-btn secondary" onclick="startInlineQrCamera()">
-        Caméra
+        Scanner QR
       </button>
-      <label class="scan-inline-btn blue" for="scan-inline-file" style="text-align:center;">
+      <label class="scan-inline-btn blue" for="scan-inline-file" style="text-align:center;;color:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important">
         Importer image QR
       </label>
       <input id="scan-inline-file" class="scan-inline-file" type="file" accept="image/*" />
