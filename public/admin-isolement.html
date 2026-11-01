@@ -760,6 +760,22 @@
       .iso-delete-confirm { min-width: 0; }
     }
 
+
+    /* === ESPÈCES / VARIÉTÉS DEPUIS LA BASE === */
+    .iso-variety-wrap{display:none;margin-bottom:12px;padding:12px;border:1px solid #dce7df;border-radius:10px;background:#f8fbf9}
+    .iso-variety-search{margin-bottom:8px!important}
+    .iso-variety-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .iso-variety-actions .form-input{margin:0;flex:1;min-width:220px}
+    .iso-variety-request-msg{font-size:12px;font-weight:800;margin-top:8px;color:#1f7a41}
+    .iso-variety-admin-panel{display:none;margin-top:16px;padding:12px;border:1px solid #ead7b5;border-left:5px solid #d68a00;border-radius:10px;background:#fffaf1}
+    .iso-variety-request-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #eee}
+    .iso-variety-request-row:last-child{border-bottom:0}
+    .iso-variety-request-meta{font-size:11px;color:#667085;margin-top:3px}
+    .iso-variety-request-buttons{display:flex;gap:6px;flex-wrap:wrap}
+    .iso-variety-request-buttons button{border:0;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:900;cursor:pointer}
+    .iso-variety-approve{background:#2fa35a;color:#fff}.iso-variety-reject{background:#c0392b;color:#fff}
+    .iso-readonly{background:#f1f5f3!important;color:#32443a!important;font-weight:800}
+
   </style>
 
 <style id="petri-exhausted-style">
@@ -968,10 +984,7 @@
             <form id="form-new-isolation">
               <label class="form-label">Espèce / Genre *</label>
               <select class="form-input" id="new-iso-espece" required>
-                <option value="">— Choisir —</option>
-                <option value="PLEUROTUS">Pleurotus spp.</option>
-                <option value="AGARICUS">Agaricus bisporus</option>
-                <option value="LYOPHYLLACEAE">Lyophyllaceae</option>
+                <option value="">Chargement des espèces...</option>
               </select>
 
               <div id="cycle-info-box" style="display:none; background:#e7f3ff; border:1px solid #b3d9ff; border-radius:8px; padding:15px; margin:15px 0;">
@@ -980,7 +993,25 @@
               </div>
 
               <label class="form-label">Nom du champignon / souche *</label>
-              <input class="form-input" id="new-iso-nom" type="text" required placeholder="Ex : Pleurote gris" />
+              <input class="form-input iso-readonly" id="new-iso-nom" type="text" required readonly placeholder="Sélectionnez une espèce puis une variété" />
+
+              <div class="iso-variety-wrap" id="new-iso-variety-wrap">
+                <label class="form-label" for="new-iso-variety-search">Variété / souche *</label>
+                <input class="form-input iso-variety-search" id="new-iso-variety-search" type="search" placeholder="Rechercher rapidement une variété..." autocomplete="off" />
+                <select class="form-input" id="new-iso-variety" required>
+                  <option value="">— Choisir une variété / souche —</option>
+                </select>
+                <div class="iso-variety-actions">
+                  <input class="form-input" id="new-iso-variety-proposal" type="text" placeholder="Nouvelle variété non listée" />
+                  <button type="button" class="btn-action btn-green" id="btn-propose-variety">Proposer une nouvelle variété</button>
+                </div>
+                <div class="iso-variety-request-msg" id="iso-variety-request-msg"></div>
+
+                <div class="iso-variety-admin-panel" id="iso-variety-admin-panel">
+                  <strong>Demandes de nouvelles variétés en attente</strong>
+                  <div id="iso-variety-admin-list" style="margin-top:8px;"></div>
+                </div>
+              </div>
 
               <label class="form-label">Catégorie *</label>
               <select class="form-input" id="new-iso-categorie" required>
@@ -1000,7 +1031,7 @@
               <input class="form-input" id="new-iso-date-exp" type="date" required />
 
               <label class="form-label">Opérateur *</label>
-              <input class="form-input" id="new-iso-operateur" type="text" required placeholder="Ex : Agro" />
+              <input class="form-input iso-readonly" id="new-iso-operateur" type="text" required readonly placeholder="Utilisateur connecté" />
 
               <label class="form-label">Observations / Notes</label>
               <textarea class="form-input" id="new-iso-infos" rows="3"></textarea>
@@ -1375,24 +1406,10 @@
       const PETRI_PAGE_SIZE = 10;
       const petriPhasePages = { 1: 1, 2: 1, 3: 1 };
 
-      const CYCLES_BIO = {
-        PLEUROTUS: {
-          nom: "Pleurotus spp.",
-          duree: "J0 → J10",
-          fenetre_piquage: "J4 → J10",
-          meilleur_moment: "J6 → J8",
-          jours_total: 10,
-          remarque: ""
-        },
-        AGARICUS: {
-          nom: "Agaricus bisporus",
-          duree: "≈ J0 → J14 (adaptation à un nouveau milieu)",
-          fenetre_piquage: "Après contrôle visuel et validation du développement",
-          meilleur_moment: "Transfert LC : depuis un P3 validé, avec un micro-fragment propre",
-          jours_total: 14,
-          remarque: "D’après les tests Mycelium Tech Digital : le mycélium du Champignon de Paris nécessite environ 14 jours pour s’adapter à un nouveau milieu de culture. Exception pour les milieux liquides : lors d’un transfert gélose → solution nutritive, prélever un petit fragment de P3 validé avec le minimum de gélose possible, par une découpe superficielle de 0,2 à 0,5 mm. Grâce à ce procédé, nous avons pu gagner environ 14 jours : le développement en LC est rapide et correspond à la cinétique théorique."
-        }
-      };
+      let speciesRows = [];
+      let currentSpecies = null;
+      let currentVarieties = [];
+      let currentSessionUser = null;
 
       const historiqueTbody = document.getElementById("historique-tbody");
       const alertIsoSelected = document.getElementById("alert-iso-selected");
@@ -1419,9 +1436,142 @@
       const newIsoEspece = document.getElementById("new-iso-espece");
       const cycleInfoBox = document.getElementById("cycle-info-box");
       const cycleInfoContent = document.getElementById("cycle-info-content");
+      const newIsoNom = document.getElementById("new-iso-nom");
+      const newIsoVarietyWrap = document.getElementById("new-iso-variety-wrap");
+      const newIsoVariety = document.getElementById("new-iso-variety");
+      const newIsoVarietySearch = document.getElementById("new-iso-variety-search");
+      const newIsoVarietyProposal = document.getElementById("new-iso-variety-proposal");
+      const btnProposeVariety = document.getElementById("btn-propose-variety");
+      const isoVarietyRequestMsg = document.getElementById("iso-variety-request-msg");
+      const isoVarietyAdminPanel = document.getElementById("iso-variety-admin-panel");
+      const isoVarietyAdminList = document.getElementById("iso-variety-admin-list");
+      const newIsoOperateur = document.getElementById("new-iso-operateur");
 
       const geloseCompoTbody = document.getElementById("gelose-compo-tbody");
       const solutionCompoTbody = document.getElementById("solution-compo-tbody");
+
+      function speciesOptionLabel(s) {
+        const common = String(s.nom_commun || '').trim();
+        const scientific = String(s.nom_scientifique || '').trim();
+        return common && common.toLowerCase() !== scientific.toLowerCase()
+          ? scientific + ' — ' + common
+          : scientific;
+      }
+
+      async function loadSpeciesFromDatabase() {
+        speciesRows = await apiGet('/api/especes');
+        newIsoEspece.innerHTML = '<option value="">— Choisir —</option>' + speciesRows.map(function(s){
+          return '<option value="' + Number(s.id_espece) + '">' + htmlEscape(speciesOptionLabel(s)) + '</option>';
+        }).join('');
+      }
+
+      function renderVarietyOptions(filterText) {
+        const q = String(filterText || '').trim().toLowerCase();
+        const selected = String(newIsoVariety.value || '');
+        const rows = currentVarieties.filter(function(v){ return !q || String(v.nom || '').toLowerCase().includes(q); });
+        newIsoVariety.innerHTML = '<option value="">— Choisir une variété / souche —</option>' + rows.map(function(v){
+          return '<option value="' + Number(v.id) + '" data-name="' + htmlEscape(v.nom) + '">' + htmlEscape(v.nom) + '</option>';
+        }).join('');
+        if (rows.some(function(v){ return String(v.id) === selected; })) newIsoVariety.value = selected;
+      }
+
+      function composeMushroomName() {
+        const prefix = String(currentSpecies?.nom_commun || currentSpecies?.nom_scientifique || '').trim();
+        const opt = newIsoVariety.options[newIsoVariety.selectedIndex];
+        const variety = opt ? String(opt.dataset.name || opt.textContent || '').trim() : '';
+        newIsoNom.value = prefix && variety ? (prefix + ' - ' + variety) : prefix;
+      }
+
+      function renderSpeciesCycleInfo(species) {
+        if (!species) { cycleInfoBox.style.display = 'none'; return; }
+        const duration = Number(species.cycle_duree_jours || 0);
+        const start = species.fenetre_optimale_debut;
+        const end = species.fenetre_optimale_fin;
+        cycleInfoContent.innerHTML =
+          '<p style="margin:0 0 8px;"><strong>Espèce :</strong> ' + htmlEscape(species.nom_scientifique || '—') + '</p>' +
+          '<p style="margin:0 0 8px;"><strong>Nom commun :</strong> ' + htmlEscape(species.nom_commun || '—') + '</p>' +
+          '<p style="margin:0 0 8px;"><strong>Durée du cycle :</strong> ' + (duration ? ('J0 → J' + duration) : '—') + '</p>' +
+          '<p style="margin:0;"><strong>Fenêtre optimale :</strong> ' + (start != null && end != null ? ('J' + start + ' → J' + end) : '—') + '</p>';
+        cycleInfoBox.style.display = 'block';
+      }
+
+      function updateExpirationFromSpecies() {
+        const duration = Number(currentSpecies?.cycle_duree_jours || 0);
+        const dateValue = document.getElementById('new-iso-date-prelev').value;
+        if (!duration || !dateValue) return;
+        const d = new Date(dateValue + 'T00:00:00');
+        if (Number.isNaN(d.getTime())) return;
+        d.setDate(d.getDate() + duration);
+        document.getElementById('new-iso-date-exp').value = d.toISOString().slice(0,10);
+      }
+
+      async function loadVarietiesForSpecies(speciesId) {
+        currentVarieties = speciesId ? await apiGet('/api/especes/' + Number(speciesId) + '/varietes') : [];
+        newIsoVarietySearch.value = '';
+        renderVarietyOptions('');
+        composeMushroomName();
+      }
+
+      async function loadCurrentSessionForIsolation() {
+        const session = await apiGet('/api/auth/session');
+        currentSessionUser = session?.user || null;
+        newIsoOperateur.value = currentSessionUser?.username || '';
+        const isAdmin = String(currentSessionUser?.role || '').toLowerCase() === 'admin';
+        btnProposeVariety.textContent = isAdmin ? 'Ajouter la variété' : 'Proposer une nouvelle variété';
+        isoVarietyAdminPanel.style.display = isAdmin ? 'block' : 'none';
+        if (isAdmin) await loadPendingVarietyRequests();
+      }
+
+      async function loadPendingVarietyRequests() {
+        if (!currentSessionUser || String(currentSessionUser.role).toLowerCase() !== 'admin') return;
+        try {
+          const rows = await apiGet('/api/admin/espece-variety-requests?status=pending');
+          if (!rows.length) {
+            isoVarietyAdminList.innerHTML = '<div style="font-size:12px;color:#667085;">Aucune demande en attente.</div>';
+            return;
+          }
+          isoVarietyAdminList.innerHTML = rows.map(function(r){
+            return '<div class="iso-variety-request-row">' +
+              '<div><strong>' + htmlEscape(r.variety_name) + '</strong><div class="iso-variety-request-meta">' + htmlEscape(r.nom_scientifique || '') + ' · demandé par ' + htmlEscape(r.requested_by_name || 'Opérateur') + '</div></div>' +
+              '<div class="iso-variety-request-buttons"><button class="iso-variety-approve" type="button" onclick="approveIsoVarietyRequest(' + Number(r.id) + ')">Approuver</button><button class="iso-variety-reject" type="button" onclick="rejectIsoVarietyRequest(' + Number(r.id) + ')">Refuser</button></div>' +
+            '</div>';
+          }).join('');
+        } catch (e) {
+          isoVarietyAdminList.innerHTML = '<div style="font-size:12px;color:#c0392b;">' + htmlEscape(e.message || 'Erreur chargement') + '</div>';
+        }
+      }
+
+      async function submitNewVarietyProposal() {
+        const speciesId = Number(newIsoEspece.value || 0);
+        const name = String(newIsoVarietyProposal.value || '').trim();
+        if (!speciesId || !name) { isoVarietyRequestMsg.textContent = 'Saisissez une nouvelle variété.'; return; }
+        try {
+          const result = await apiPost('/api/especes/' + speciesId + '/varietes', { nom: name });
+          newIsoVarietyProposal.value = '';
+          if (result.pending) {
+            isoVarietyRequestMsg.textContent = '✅ Demande envoyée à un administrateur. La variété sera disponible après approbation.';
+          } else {
+            isoVarietyRequestMsg.textContent = '✅ Variété ajoutée.';
+            await loadVarietiesForSpecies(speciesId);
+            if (result.variety?.id) newIsoVariety.value = String(result.variety.id);
+            composeMushroomName();
+            await loadPendingVarietyRequests();
+          }
+        } catch(e) { isoVarietyRequestMsg.textContent = '❌ ' + (e.message || e); }
+      }
+
+      window.approveIsoVarietyRequest = async function(id) {
+        try {
+          const result = await apiPost('/api/admin/espece-variety-requests/' + Number(id) + '/approve', {});
+          await loadPendingVarietyRequests();
+          if (currentSpecies && Number(result.variety?.espece_id) === Number(currentSpecies.id_espece)) await loadVarietiesForSpecies(currentSpecies.id_espece);
+        } catch(e) { alert('❌ ' + (e.message || e)); }
+      };
+      window.rejectIsoVarietyRequest = async function(id) {
+        const note = prompt('Motif du refus (facultatif) :', '') || '';
+        try { await apiPost('/api/admin/espece-variety-requests/' + Number(id) + '/reject', { note: note }); await loadPendingVarietyRequests(); }
+        catch(e) { alert('❌ ' + (e.message || e)); }
+      };
 
       function hideAllForms() {
         formNewIsolationContainer.style.display = "none";
@@ -1439,9 +1589,9 @@
       }
 
       function getEspeceLabel(cycleType) {
-        if (cycleType === "PLEUROTUS") return "Pleurotus spp.";
-        if (cycleType === "AGARICUS") return "Agaricus bisporus";
-        return cycleType || "—";
+        const code = String(cycleType || "").toUpperCase();
+        const found = speciesRows.find(function(s){ return String(s.cycle_type || "").toUpperCase() === code; });
+        return found ? found.nom_scientifique : (cycleType || "—");
       }
 
       async function apiGet(path) {
@@ -3030,48 +3180,35 @@ ${labels}
         if (recapContainer) recapContainer.style.display = "none";
       }
 
-      newIsoEspece.addEventListener("change", function(e) {
-        const espece = e.target.value;
-        if (!espece) {
-          cycleInfoBox.style.display = "none";
+      newIsoEspece.addEventListener("change", async function(e) {
+        const speciesId = Number(e.target.value || 0);
+        currentSpecies = speciesRows.find(function(s){ return Number(s.id_espece) === speciesId; }) || null;
+        newIsoVarietyWrap.style.display = currentSpecies ? 'block' : 'none';
+        isoVarietyRequestMsg.textContent = '';
+        renderSpeciesCycleInfo(currentSpecies);
+        if (!currentSpecies) {
+          currentVarieties = [];
+          newIsoNom.value = '';
           return;
         }
-
-        const cycle = CYCLES_BIO[espece];
-        cycleInfoContent.innerHTML =
-          '<p style="margin:0 0 8px;"><strong>Espèce :</strong> ' + cycle.nom + '</p>' +
-          '<p style="margin:0 0 8px;"><strong>Durée :</strong> ' + cycle.duree + '</p>' +
-          '<p style="margin:0 0 8px;"><strong>Piquage :</strong> ' + cycle.fenetre_piquage + '</p>' +
-          '<p style="margin:0 0 8px;"><strong>✅ Optimal :</strong> ' + cycle.meilleur_moment + '</p>' +
-          (cycle.remarque
-            ? '<div style="margin-top:10px;padding:10px 12px;border-left:4px solid #2fa35a;background:#f1fff5;border-radius:6px;color:#1f7a41;line-height:1.5;"><strong>🧬 Remarque Mycelium Tech Digital :</strong> ' + cycle.remarque + '</div>'
-            : '');
-        cycleInfoBox.style.display = "block";
-
-        const datePrelevInput = document.getElementById("new-iso-date-prelev");
-        if (datePrelevInput.value) {
-          const datePrelev = new Date(datePrelevInput.value);
-          const dateExp = new Date(datePrelev);
-          dateExp.setDate(dateExp.getDate() + cycle.jours_total);
-          document.getElementById("new-iso-date-exp").value = dateExp.toISOString().slice(0, 10);
-        }
+        await loadVarietiesForSpecies(speciesId);
+        updateExpirationFromSpecies();
       });
 
-      document.getElementById("new-iso-date-prelev").addEventListener("change", function(e) {
-        const espece = newIsoEspece.value;
-        if (!espece) return;
-        const cycle = CYCLES_BIO[espece];
-        const datePrelev = new Date(e.target.value);
-        const dateExp = new Date(datePrelev);
-        dateExp.setDate(dateExp.getDate() + cycle.jours_total);
-        document.getElementById("new-iso-date-exp").value = dateExp.toISOString().slice(0, 10);
-      });
+      newIsoVariety.addEventListener('change', composeMushroomName);
+      newIsoVarietySearch.addEventListener('input', function(){ renderVarietyOptions(this.value); });
+      btnProposeVariety.addEventListener('click', submitNewVarietyProposal);
 
-      btnNewIsolation.addEventListener("click", function() {
+      document.getElementById("new-iso-date-prelev").addEventListener("change", updateExpirationFromSpecies);
+
+      btnNewIsolation.addEventListener("click", async function() {
         hideAllForms();
         formNewIsolationContainer.style.display = "block";
         formNewIsolationContainer.scrollIntoView({ behavior: "smooth" });
         document.getElementById("new-iso-date-prelev").value = new Date().toISOString().slice(0, 10);
+        currentSpecies = null; currentVarieties = []; newIsoNom.value = ''; newIsoVarietyWrap.style.display = 'none';
+        try { await Promise.all([loadSpeciesFromDatabase(), loadCurrentSessionForIsolation()]); }
+        catch(e) { alert('❌ Impossible de charger les espèces ou la session : ' + (e.message || e)); }
       });
 
       document.getElementById("btn-cancel-new-isolation").addEventListener("click", function() {
@@ -3083,14 +3220,16 @@ ${labels}
       formNewIsolation.addEventListener("submit", async function(e) {
         e.preventDefault();
 
-        const espece = newIsoEspece.value;
-        const nom = document.getElementById("new-iso-nom").value.trim();
+        const especeId = Number(newIsoEspece.value || 0);
+        const varietyId = Number(newIsoVariety.value || 0);
+        const nom = newIsoNom.value.trim();
         const categorie = document.getElementById("new-iso-categorie").value;
         const origine = document.getElementById("new-iso-origine").value.trim();
         const datePrelev = document.getElementById("new-iso-date-prelev").value;
         const dateExp = document.getElementById("new-iso-date-exp").value;
-        const operateur = document.getElementById("new-iso-operateur").value.trim();
         const infos = document.getElementById("new-iso-infos").value.trim();
+
+        if (!especeId || !varietyId || !nom) { alert("Sélectionnez une espèce et une variété / souche approuvée."); return; }
 
         if (new Date(dateExp) <= new Date(datePrelev)) {
           alert("Date expiration invalide");
@@ -3100,14 +3239,14 @@ ${labels}
         try {
           const payload = {
             champignon: nom,
-            cycle_type: espece,
+            espece_id: especeId,
+            variety_id: varietyId,
             categorie: categorie,
             origine: origine,
             infos: infos,
             date_prepa: datePrelev,
             date_prelev: datePrelev,
             date_exp: dateExp,
-            operateur: operateur,
             agar: { nom: "", volume_l: 0, ph: 0, composants: [] },
             solution_lc: { nom: "", volume_l: 0, composants: [] }
           };
@@ -3833,7 +3972,9 @@ ${labels}
       });
 
       deselectIsolation();
-      loadHistorique();
+      loadSpeciesFromDatabase()
+        .catch(function(e){ console.warn('Chargement espèces:', e); })
+        .finally(loadHistorique);
     })();
   
 

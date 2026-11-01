@@ -3317,7 +3317,7 @@ app.get("/api/isolements", async (req, res) => {
     let sql = `
       SELECT id, code, champignon, cycle_type, categorie, origine, infos,
              agar, date_prepa, date_prelev, date_exp, operateur,
-             solution_lc, statut, global_status, created_at, updated_at
+             solution_lc, statut, global_status, created_at, updated_at, espece_id, variety_id
       FROM isolements
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
       ORDER BY created_at DESC
@@ -3332,74 +3332,187 @@ app.get("/api/isolements", async (req, res) => {
   }
 });
 
+
+let speciesVarietySchemaReady = false;
+async function ensureSpeciesVarietySchema() {
+  if (speciesVarietySchemaReady) return;
+  await realPool.query(`
+    CREATE TABLE IF NOT EXISTS espece_varietes (
+      id BIGSERIAL PRIMARY KEY,
+      espece_id BIGINT NOT NULL REFERENCES especes(id_espece) ON DELETE CASCADE,
+      nom TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by UUID,
+      created_by_name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_espece_varietes_name
+      ON espece_varietes(espece_id, lower(nom));
+
+    CREATE TABLE IF NOT EXISTS espece_variety_requests (
+      id BIGSERIAL PRIMARY KEY,
+      espece_id BIGINT NOT NULL REFERENCES especes(id_espece) ON DELETE CASCADE,
+      variety_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),
+      requested_by UUID,
+      requested_by_name TEXT NOT NULL,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_by UUID,
+      reviewed_by_name TEXT,
+      reviewed_at TIMESTAMPTZ,
+      review_note TEXT,
+      created_variety_id BIGINT REFERENCES espece_varietes(id) ON DELETE SET NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_espece_variety_requests_pending
+      ON espece_variety_requests(espece_id, lower(variety_name)) WHERE status='pending';
+    CREATE INDEX IF NOT EXISTS ix_espece_variety_requests_status
+      ON espece_variety_requests(status, requested_at DESC);
+    ALTER TABLE isolements ADD COLUMN IF NOT EXISTS espece_id BIGINT REFERENCES especes(id_espece) ON DELETE SET NULL;
+    ALTER TABLE isolements ADD COLUMN IF NOT EXISTS variety_id BIGINT REFERENCES espece_varietes(id) ON DELETE SET NULL;
+  `);
+  await realPool.query(`
+    INSERT INTO espece_varietes(espece_id,nom,created_by_name)
+    SELECT e.id_espece,v.nom,'migration'
+    FROM especes e
+    CROSS JOIN (VALUES
+      ('ItalienSpawn F599 (Blanc)'),
+      ('ItalienSpawn FB30 (Brown)'),
+      ('ItalienSpawn FB35 (Portobello)'),
+      ('Sylvan A15 (Blanc)'),
+      ('Sylvan Tuscan (Brown)'),
+      ('Bio.De'),
+      ('Saoudi Portabella'),
+      ('Saoudi Brown')
+    ) AS v(nom)
+    WHERE lower(e.nom_scientifique)=lower('Agaricus bisporus')
+    ON CONFLICT DO NOTHING;
+  `);
+  speciesVarietySchemaReady = true;
+}
+
+function speciesCycleType(species) {
+  const scientific = String(species?.nom_scientifique || '').trim();
+  const first = scientific.split(/\s+/)[0] || `ESPECE_${species?.id_espece || ''}`;
+  return first.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_+|_+$/g,'').toUpperCase();
+}
+
+app.get('/api/especes', async (_req,res) => {
+  try {
+    const r=await pool.query(`SELECT id_espece,nom_scientifique,nom_commun,cycle_duree_jours,fenetre_optimale_debut,fenetre_optimale_fin,description,date_creation,date_modification FROM especes ORDER BY nom_scientifique`);
+    res.json(r.rows.map(row=>({...row,cycle_type:speciesCycleType(row)})));
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/especes/:id/varietes', async (req,res) => {
+  try {
+    await ensureSpeciesVarietySchema();
+    const id=Number(req.params.id); if(!id)return res.status(400).json({error:'Espèce invalide.'});
+    const r=await pool.query(`SELECT id,espece_id,nom FROM espece_varietes WHERE espece_id=$1 AND active=TRUE ORDER BY lower(nom)`,[id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/especes/:id/varietes', async (req,res) => {
+  try {
+    await ensureSpeciesVarietySchema();
+    const speciesId=Number(req.params.id); const name=String(req.body?.nom||'').trim();
+    if(!speciesId||name.length<2)return res.status(400).json({error:'Espèce et nom de variété requis.'});
+    const species=await pool.query(`SELECT id_espece FROM especes WHERE id_espece=$1`,[speciesId]);
+    if(!species.rows.length)return res.status(404).json({error:'Espèce introuvable.'});
+    const existing=await pool.query(`SELECT id,espece_id,nom FROM espece_varietes WHERE espece_id=$1 AND lower(nom)=lower($2) LIMIT 1`,[speciesId,name]);
+    if(existing.rows.length)return res.json({success:true,pending:false,variety:existing.rows[0],existing:true});
+    if(req.adminSession?.role==='admin'){
+      const r=await pool.query(`INSERT INTO espece_varietes(espece_id,nom,created_by,created_by_name) VALUES($1,$2,$3,$4) RETURNING id,espece_id,nom`,[speciesId,name,req.adminSession?.userId||null,req.adminSession?.username||'Admin']);
+      return res.status(201).json({success:true,pending:false,variety:r.rows[0]});
+    }
+    if(req.adminSession?.role!=='operator')return res.status(403).json({error:'Vous ne pouvez pas proposer une nouvelle variété.'});
+    const pending=await pool.query(`SELECT id FROM espece_variety_requests WHERE espece_id=$1 AND lower(variety_name)=lower($2) AND status='pending' LIMIT 1`,[speciesId,name]);
+    if(pending.rows.length)return res.status(202).json({success:true,pending:true,request_id:pending.rows[0].id,existing_request:true});
+    const r=await pool.query(`INSERT INTO espece_variety_requests(espece_id,variety_name,requested_by,requested_by_name) VALUES($1,$2,$3,$4) RETURNING id`,[speciesId,name,req.adminSession?.userId||null,req.adminSession?.username||'Opérateur']);
+    return res.status(202).json({success:true,pending:true,request_id:r.rows[0].id});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/admin/espece-variety-requests', async (req,res) => {
+  if(req.adminSession?.role!=='admin')return res.status(403).json({error:'Action réservée aux administrateurs.'});
+  try {
+    await ensureSpeciesVarietySchema();
+    const status=String(req.query.status||'pending').toLowerCase();
+    const r=await pool.query(`SELECT r.*,e.nom_scientifique,e.nom_commun FROM espece_variety_requests r JOIN especes e ON e.id_espece=r.espece_id WHERE ($1='all' OR r.status=$1) ORDER BY r.requested_at DESC LIMIT 300`,[status]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/admin/espece-variety-requests/:id/approve', async (req,res) => {
+  if(req.adminSession?.role!=='admin')return res.status(403).json({error:'Action réservée aux administrateurs.'});
+  const client=await pool.connect();
+  try {
+    await ensureSpeciesVarietySchema(); await client.query('BEGIN');
+    const q=await client.query(`SELECT * FROM espece_variety_requests WHERE id=$1 FOR UPDATE`,[Number(req.params.id)]);
+    if(!q.rows.length||q.rows[0].status!=='pending'){await client.query('ROLLBACK');return res.status(409).json({error:'Demande déjà traitée.'});}
+    const row=q.rows[0];
+    let v=await client.query(`SELECT id,espece_id,nom FROM espece_varietes WHERE espece_id=$1 AND lower(nom)=lower($2) LIMIT 1`,[row.espece_id,row.variety_name]);
+    if(!v.rows.length)v=await client.query(`INSERT INTO espece_varietes(espece_id,nom,created_by,created_by_name) VALUES($1,$2,$3,$4) RETURNING id,espece_id,nom`,[row.espece_id,row.variety_name,req.adminSession?.userId||null,req.adminSession?.username||'Admin']);
+    await client.query(`UPDATE espece_variety_requests SET status='approved',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),created_variety_id=$4 WHERE id=$1`,[row.id,req.adminSession?.userId||null,req.adminSession?.username||'Admin',v.rows[0].id]);
+    await client.query('COMMIT'); res.json({success:true,variety:v.rows[0]});
+  } catch(e){try{await client.query('ROLLBACK')}catch(_){ } res.status(500).json({error:e.message});} finally{client.release();}
+});
+
+app.post('/api/admin/espece-variety-requests/:id/reject', async (req,res) => {
+  if(req.adminSession?.role!=='admin')return res.status(403).json({error:'Action réservée aux administrateurs.'});
+  try {
+    await ensureSpeciesVarietySchema();
+    const r=await pool.query(`UPDATE espece_variety_requests SET status='rejected',reviewed_by=$2,reviewed_by_name=$3,reviewed_at=now(),review_note=$4 WHERE id=$1 AND status='pending' RETURNING id`,[Number(req.params.id),req.adminSession?.userId||null,req.adminSession?.username||'Admin',String(req.body?.note||'')]);
+    if(!r.rows.length)return res.status(409).json({error:'Demande déjà traitée.'}); res.json({success:true});
+  } catch(e){res.status(500).json({error:e.message});}
+});
+
 app.post("/api/isolements", async (req, res) => {
   try {
-    let b = req.body || {};
+    await ensureSpeciesVarietySchema();
+    const b = req.body || {};
+    const especeId = Number(b.espece_id || 0);
+    const varietyId = Number(b.variety_id || 0);
+    if (!especeId || !varietyId) return res.status(400).json({ error: "Espèce et variété obligatoires." });
 
-    let cycle_type = String(b.cycle_type || "").trim().toUpperCase();
-    let allowedCycles = new Set(["AGARICUS", "PLEUROTUS"]);
-    if (!allowedCycles.has(cycle_type)) {
-      return res.status(400).json({
-        error: "cycle_type invalide. Valeurs acceptÃ©es: AGARICUS, PLEUROTUS",
-      });
-    }
+    const speciesResult = await pool.query(`SELECT id_espece,nom_scientifique,nom_commun,cycle_duree_jours,fenetre_optimale_debut,fenetre_optimale_fin FROM especes WHERE id_espece=$1 LIMIT 1`, [especeId]);
+    if (!speciesResult.rows.length) return res.status(400).json({ error: "Espèce invalide." });
+    const species = speciesResult.rows[0];
+    const varietyResult = await pool.query(`SELECT id,espece_id,nom FROM espece_varietes WHERE id=$1 AND espece_id=$2 AND active=TRUE LIMIT 1`, [varietyId,especeId]);
+    if (!varietyResult.rows.length) return res.status(400).json({ error: "Variété invalide ou non approuvée." });
+    const variety = varietyResult.rows[0];
 
-    let champignon = String(b.champignon || "").trim();
-    let categorie = String(b.categorie || "").trim();
-    let origine = String(b.origine || "").trim();
-    let infos = b.infos === undefined || b.infos === null ? "" : String(b.infos);
+    const cycle_type = speciesCycleType(species);
+    const prefix = String(species.nom_commun || species.nom_scientifique || '').trim();
+    const champignon = `${prefix} - ${String(variety.nom).trim()}`;
+    const categorie = String(b.categorie || "").trim();
+    const origine = String(b.origine || "").trim();
+    const infos = b.infos === undefined || b.infos === null ? "" : String(b.infos);
+    const date_prepa = String(b.date_prepa || "").trim();
+    const date_prelev = String(b.date_prelev || "").trim();
+    const date_exp = String(b.date_exp || "").trim();
+    // Security: operator identity always comes from the authenticated server session.
+    const operateur = String(req.adminSession?.username || "").trim();
 
-    let date_prepa = String(b.date_prepa || "").trim();
-    let date_prelev = String(b.date_prelev || "").trim();
-    let date_exp = String(b.date_exp || "").trim();
-    let operateur = String(b.operateur || "").trim();
+    const agar = b.agar && typeof b.agar === "object" ? b.agar : null;
+    const solution_lc = b.solution_lc && typeof b.solution_lc === "object" ? b.solution_lc : null;
+    if (!champignon || !categorie || !origine || !date_prepa || !date_prelev || !date_exp || !operateur) return res.status(400).json({ error: "Champs obligatoires manquants" });
 
-    let agar = b.agar && typeof b.agar === "object" ? b.agar : null;
-    let solution_lc = b.solution_lc && typeof b.solution_lc === "object" ? b.solution_lc : null;
-
-    if (!champignon || !categorie || !origine || !date_prepa || !date_prelev || !date_exp || !operateur) {
-      return res.status(400).json({ error: "Champs obligatoires manquants" });
-    }
-
-    // Validation dates (exp > prelev)
     const prelev = new Date(date_prelev);
     const exp = new Date(date_exp);
-    if (Number.isNaN(prelev.getTime()) || Number.isNaN(exp.getTime())) {
-      return res.status(400).json({ error: "Format date invalide (YYYY-MM-DD attendu)." });
-    }
-    if (exp.getTime() <= prelev.getTime()) {
-      return res.status(400).json({ error: "date_exp doit Ãªtre strictement supÃ©rieure Ã  date_prelev." });
-    }
+    if (Number.isNaN(prelev.getTime()) || Number.isNaN(exp.getTime())) return res.status(400).json({ error: "Format date invalide (YYYY-MM-DD attendu)." });
+    if (exp.getTime() <= prelev.getTime()) return res.status(400).json({ error: "date_exp doit être strictement supérieure à date_prelev." });
 
-    let code = genCode("ISO");
-    let toJsonOrNull = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
-
-    const sql = `
+    const code = genCode("ISO");
+    const toJsonOrNull = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
+    const r = await pool.query(`
       INSERT INTO isolements
-        (code, champignon, cycle_type, categorie, origine, infos,
-         agar, date_prepa, date_prelev, date_exp, operateur,
-         solution_lc, statut)
-      VALUES
-        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'EN_INCUBATION')
+        (code, champignon, cycle_type, categorie, origine, infos, agar, date_prepa, date_prelev, date_exp, operateur, solution_lc, statut, espece_id, variety_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'EN_INCUBATION',$13,$14)
       RETURNING *;
-    `;
-
-    const r = await pool.query(sql, [
-      code,
-      champignon,
-      cycle_type,
-      categorie,
-      origine,
-      infos,
-      toJsonOrNull(agar),
-      date_prepa,
-      date_prelev,
-      date_exp,
-      operateur,
-      toJsonOrNull(solution_lc),
-    ]);
-
-    let created = r.rows[0];
+    `, [code,champignon,cycle_type,categorie,origine,infos,toJsonOrNull(agar),date_prepa,date_prelev,date_exp,operateur,toJsonOrNull(solution_lc),especeId,varietyId]);
+    const created = r.rows[0];
     res.status(201).json({ ...created, ...computeIsoState(created) });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -3415,7 +3528,7 @@ app.get("/api/isolements/:id", async (req, res) => {
     const sql = `
       SELECT id, code, champignon, cycle_type, categorie, origine, infos,
              agar, date_prepa, date_prelev, date_exp, operateur,
-             solution_lc, statut, global_status, created_at, updated_at
+             solution_lc, statut, global_status, created_at, updated_at, espece_id, variety_id
       FROM isolements
       WHERE id = $1
       LIMIT 1;
