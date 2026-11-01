@@ -415,7 +415,7 @@
                 <th>Lot</th>
                 <th>
                   <details class="grain-header-filter" id="grain-date-menu" onclick="event.stopPropagation()">
-                    <summary>Date</summary>
+                    <summary>Date d’ensemencement</summary>
                     <div class="grain-header-popover">
                       <label for="grain-history-date-filter">Rechercher une date</label>
                       <input id="grain-history-date-filter" type="date" onchange="applyGrainHistoryDateFilter(this.value)">
@@ -670,6 +670,16 @@
       return ['LC', normalizeText(lcCodeOf(u)), normalizeText(lcPotShortOf(u))].join('|');
     }
     function semisGroupDate(u){return u?.inoculation_created_at||u?.inoculated_at||u?.date_inoculation||u?.seeded_at||'';}
+    function currentGrainDay(u){
+      const raw=semisGroupDate(u);
+      if(!raw)return null;
+      const start=new Date(raw);
+      if(Number.isNaN(start.getTime()))return null;
+      const now=new Date();
+      const startDay=new Date(start.getFullYear(),start.getMonth(),start.getDate());
+      const todayDay=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+      return Math.max(0,Math.floor((todayDay-startDay)/86400000));
+    }
     function lcKey(lc){return `${lc.lc_lot_id}|${lc.lc_pot_id || ''}`}
     function selectedLcFromSelect(id){const val=$(id)?.value||'';return validLcs.find(l=>lcKey(l)===val)||null}
     function canonicalGrainStatus(st){
@@ -1189,7 +1199,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
       }else{
         body.innerHTML=pageRows.map(u=>{
           const id=Number(u.id);
-          const jour=u.last_day_index!=null?'J'+esc(u.last_day_index):'J0';
+          const currentDay=currentGrainDay(u); const jour=currentDay!=null?'J'+esc(currentDay):'—';
           const propagation=u.last_propagation_pct!=null?esc(u.last_propagation_pct)+' %':'—';
           const score=u.last_score20!=null?'score '+esc(u.last_score20)+'/20':'';
           const summaryAction=`<button type="button" onclick="event.stopPropagation();openSummaryForUnit(${id});this.closest('details').removeAttribute('open')">📋 Résumé</button>`;
@@ -1205,7 +1215,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
             <td>${esc(fmtDateTime(semisGroupDate(u)))}</td>
             <td>${sourceMyceliumCompactHtml(u)}</td>
             <td><strong>${esc(u.container_type||'—')} · ${esc(capKg(u.capacity_final_kg))}</strong><div class="grain-small">${esc(u.type_grain||'Blé')}</div></td>
-            <td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td>
+            <td><strong>${jour}</strong></td>
             <td><strong>${propagation}</strong><div class="grain-small">${score}</div></td>
             <td>${statusBadge(u.statut)}</td>
             <td style="overflow:visible"><details class="grain-actions-menu" onclick="event.stopPropagation()"><summary aria-label="Actions">⋯</summary><div class="grain-actions-popover"><button type="button" onclick="openJournalForUnit(${id});this.closest('details').removeAttribute('open')">📒 Journal</button>${summaryAction}${stockAction}<button type="button" onclick="printGrainUnitLabelsById(${id});this.closest('details').removeAttribute('open')">🏷️ Étiquette</button>${soldAction}${deleteAction}</div></details></td>
@@ -1216,7 +1226,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Contenant / capacité</div><div class="grain-history-detail-value">${esc(u.container_type||'—')} n°${esc(u.unit_number||'—')} · ${esc(capKg(u.capacity_final_kg))}</div></div>
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Type de grain</div><div class="grain-history-detail-value">${esc(u.type_grain||'Blé')}</div></div>
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Semencement</div><div class="grain-history-detail-value">${esc(fmtDateTime(semisGroupDate(u)))}</div></div>
-            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Dernier suivi</div><div class="grain-history-detail-value">${u.last_treated_at?esc(fmtDateTime(u.last_treated_at)):'Non suivi'}</div></div>
+            <div class="grain-history-detail-item"><div class="grain-history-detail-label">Jour actuel</div><div class="grain-history-detail-value">${currentDay!=null?'J'+esc(currentDay):'—'}</div></div>
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Propagation</div><div class="grain-history-detail-value">${propagation}${score?' · '+score:''}</div></div>
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Statut</div><div class="grain-history-detail-value">${statusBadge(u.statut)}</div></div>
           </div></td></tr>`;
@@ -1238,7 +1248,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
       const rows=getFilteredGrainHistoryRows();
       if(!rows.length)return alert('Aucune ligne à exporter avec les filtres actuels.');
       const headers=['Lot','Date semencement','Source','Type / capacité','Jour','Propagation','Score','Statut'];
-      const data=rows.map(u=>[u.code||'—',fmtDateTime(semisGroupDate(u)),sourceMyceliumText(u),`${u.container_type||'—'} · ${capKg(u.capacity_final_kg)}`,u.last_day_index!=null?'J'+u.last_day_index:'J0',u.last_propagation_pct!=null?u.last_propagation_pct+' %':'—',u.last_score20!=null?u.last_score20+'/20':'—',grainStatusLabel(u.statut)]);
+      const data=rows.map(u=>{const d=currentGrainDay(u);return [u.code||'—',fmtDateTime(semisGroupDate(u)),sourceMyceliumText(u),`${u.container_type||'—'} · ${capKg(u.capacity_final_kg)}`,d!=null?'J'+d:'—',u.last_propagation_pct!=null?u.last_propagation_pct+' %':'—',u.last_score20!=null?u.last_score20+'/20':'—',grainStatusLabel(u.statut)];});
       const stamp=today();
       if(format==='pdf')pdfTableDownload(`historique_grain_${stamp}`,'Historique des lots de semencement grain',headers,data);else htmlTableDownload(`historique_grain_${stamp}`,'Historique des lots de semencement grain',headers,data);
     };
