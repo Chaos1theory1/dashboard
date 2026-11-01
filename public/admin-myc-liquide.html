@@ -463,6 +463,7 @@
 .lc-pot-row-journal{background:#3498db}
 .lc-pot-row-storage{background:#21618c}
 .lc-pot-row-resume{background:#6c757d}
+.lc-pot-row-print{background:#6f42c1}
 .lc-pot-row-delete{background:#c0392b}
 .lc-lot-actions-line{
   display:flex;
@@ -2137,6 +2138,7 @@ function renderPotRowsUnderLot(lot,pots){
           <a class="lc-pot-row-journal" href="admin-lc-cycle.html?lc_id=${lot.id}&pot_id=${potId}&mode=journal">Journal</a>
           ${lcPotFrigoButtonHtml(p,lot.id)}
           <button type="button" class="lc-pot-row-resume" onclick="resumeLcPotColumn(${lot.id},${potId})">Résumé</button>
+          <button type="button" class="lc-pot-row-print" onclick="printSingleLcPotFromMain(${lot.id},${potId})">🏷️ Imprimer étiquette</button>
           <button type="button" class="lc-pot-row-delete" onclick="deleteLcPotColumn(${lot.id},${potId})">Supprimer pot</button>
         </div>
       </td>
@@ -2200,6 +2202,7 @@ function renderLotsPage(){
       <td><span class="badge-pill warn">J${l.jour_actuel??0}</span></td>
       <td><div class="lc-lot-actions-line">
         <button class="btn-action btn-blue" style="max-width:160px;padding:8px 12px" onclick="window.location.href='admin-lc-cycle.html?lc_id=${l.id}'">Journal lot</button>
+        <button class="btn-action btn-purple" style="max-width:190px;padding:8px 12px" onclick="printLcLotFromMain(${Number(l.id)})">🏷️ Imprimer étiquette</button>
         <button class="btn-delete-lc" onclick="deleteLcLot(${Number(l.id)})">Supprimer lot</button>
       </div></td>
     </tr>${potRows}`;
@@ -2270,6 +2273,34 @@ function changeLcLotsPage(direction){
   renderLotsPage();
   document.getElementById('lc-lots-body')?.closest('.admin-card')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
+async function printLcLotFromMain(lotId){
+  lotId=Number(lotId);
+  const lot=(lcLotsCache||[]).find(x=>Number(x.id)===lotId);
+  if(!lot)return alert('Lot LC introuvable.');
+  try{
+    let pots=expandedLcPotsCache.get(lotId);
+    if(!Array.isArray(pots)) pots=await getPotsForLotColumn(lotId);
+    if(!Array.isArray(pots)||!pots.length)return alert('Aucun pot à imprimer dans ce lot.');
+    expandedLcPotsCache.set(lotId,pots);
+    printLcPotLabels(lot,pots);
+  }catch(e){alert('❌ Impression étiquettes : '+(e?.message||e));}
+}
+async function printSingleLcPotFromMain(lotId,potId){
+  lotId=Number(lotId);potId=Number(potId);
+  const lot=(lcLotsCache||[]).find(x=>Number(x.id)===lotId);
+  if(!lot)return alert('Lot LC introuvable.');
+  try{
+    let pots=expandedLcPotsCache.get(lotId);
+    if(!Array.isArray(pots)) pots=await getPotsForLotColumn(lotId);
+    const pot=(pots||[]).find(p=>Number(p.id||p.pot_id||p.lc_pot_id)===potId);
+    if(!pot)return alert('Pot LC introuvable.');
+    expandedLcPotsCache.set(lotId,pots);
+    printLcPotLabels(lot,[pot]);
+  }catch(e){alert('❌ Impression étiquette : '+(e?.message||e));}
+}
+window.printLcLotFromMain=printLcLotFromMain;
+window.printSingleLcPotFromMain=printSingleLcPotFromMain;
+
 async function deleteLcLot(id){
   if(!id)return;
   const lot=(lcLotsCache||[]).find(x=>Number(x.id)===Number(id));
@@ -2670,6 +2701,33 @@ async function decodeLcQrFromFile(file) {
         qr = jsQR(data.data, canvas.width, canvas.height, { inversionAttempts: "attemptBoth" });
         if (qr && qr.data) return qr.data;
       }
+
+      // Renfort pour les photos téléphone où le QR est petit dans l'image.
+      const sourceW = img.naturalWidth || img.width;
+      const sourceH = img.naturalHeight || img.height;
+      for (const cropRatio of [0.85, 0.70, 0.55, 0.40]) {
+        const cropW = Math.max(1, Math.round(sourceW * cropRatio));
+        const cropH = Math.max(1, Math.round(sourceH * cropRatio));
+        const sx = Math.max(0, Math.round((sourceW - cropW) / 2));
+        const sy = Math.max(0, Math.round((sourceH - cropH) / 2));
+        const canvas = document.createElement("canvas");
+        const ratio = Math.min(1800 / Math.max(cropW, cropH), 1);
+        canvas.width = Math.max(1, Math.round(cropW * ratio));
+        canvas.height = Math.max(1, Math.round(cropH * ratio));
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
+        let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
+        if (qr && qr.data) return qr.data;
+        const d = data.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const gray = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) | 0;
+          const v = gray > 145 ? 255 : 0;
+          d[i] = d[i+1] = d[i+2] = v;
+        }
+        qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
+        if (qr && qr.data) return qr.data;
+      }
     } finally {
       try { URL.revokeObjectURL(img.src); } catch (_) {}
     }
@@ -2712,6 +2770,7 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 </script>
+<script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded',function(){

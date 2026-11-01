@@ -513,6 +513,7 @@
     </div>
   </div>
 
+<script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -1483,11 +1484,14 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
     }
     async function decodeGrainQrFromFile(file){
       await waitForGrainQrLibraries();
+      if(window.Html5Qrcode){try{let temp=$('grain-scan-inline-reader-temp');if(!temp){temp=document.createElement('div');temp.id='grain-scan-inline-reader-temp';temp.style.display='none';document.body.appendChild(temp);}const scanner=new Html5Qrcode('grain-scan-inline-reader-temp');const decoded=await scanner.scanFile(file,true);try{await scanner.clear();}catch(_){}if(decoded)return decoded;}catch(_){}}
       if('BarcodeDetector' in window){try{const detector=new BarcodeDetector({formats:['qr_code']});const bitmap=await createImageBitmap(file);const codes=await detector.detect(bitmap);if(codes?.[0]?.rawValue)return codes[0].rawValue;}catch(_){}}
       if(window.jsQR){const img=await loadGrainImageFromFile(file);try{
         const variants=[{scale:1,rotate:0},{scale:1.4,rotate:0},{scale:2,rotate:0},{scale:1,rotate:90},{scale:1,rotate:180},{scale:1,rotate:270}];
         for(const opt of variants){const {canvas,ctx}=drawGrainQrVariant(img,opt);let data=ctx.getImageData(0,0,canvas.width,canvas.height);let qr=jsQR(data.data,canvas.width,canvas.height,{inversionAttempts:'attemptBoth'});if(qr?.data)return qr.data;
           const d=data.data;for(let i=0;i<d.length;i+=4){const gray=(d[i]*.299+d[i+1]*.587+d[i+2]*.114)|0;const v=gray>150?255:0;d[i]=d[i+1]=d[i+2]=v;}qr=jsQR(data.data,canvas.width,canvas.height,{inversionAttempts:'attemptBoth'});if(qr?.data)return qr.data;}
+        const sourceW=img.naturalWidth||img.width,sourceH=img.naturalHeight||img.height;
+        for(const cropRatio of [.85,.70,.55,.40]){const cropW=Math.max(1,Math.round(sourceW*cropRatio)),cropH=Math.max(1,Math.round(sourceH*cropRatio)),sx=Math.max(0,Math.round((sourceW-cropW)/2)),sy=Math.max(0,Math.round((sourceH-cropH)/2));const canvas=document.createElement('canvas'),ratio=Math.min(1800/Math.max(cropW,cropH),1);canvas.width=Math.max(1,Math.round(cropW*ratio));canvas.height=Math.max(1,Math.round(cropH*ratio));const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,sx,sy,cropW,cropH,0,0,canvas.width,canvas.height);let data=ctx.getImageData(0,0,canvas.width,canvas.height),qr=jsQR(data.data,data.width,data.height,{inversionAttempts:'attemptBoth'});if(qr?.data)return qr.data;const d=data.data;for(let i=0;i<d.length;i+=4){const gray=(d[i]*.299+d[i+1]*.587+d[i+2]*.114)|0,v=gray>145?255:0;d[i]=d[i+1]=d[i+2]=v;}qr=jsQR(data.data,data.width,data.height,{inversionAttempts:'attemptBoth'});if(qr?.data)return qr.data;}
       }finally{try{URL.revokeObjectURL(img.src);}catch(_){}}}
       throw new Error('Aucun QR détecté. Reprends une photo plus nette, bien cadrée, ou colle le lien du QR.');
     }

@@ -1827,6 +1827,33 @@ async function decodeLcQrFromFile(file) {
         qr = jsQR(data.data, canvas.width, canvas.height, { inversionAttempts: "attemptBoth" });
         if (qr && qr.data) return qr.data;
       }
+
+      // Renfort pour les photos téléphone où le QR est petit dans l'image.
+      const sourceW = img.naturalWidth || img.width;
+      const sourceH = img.naturalHeight || img.height;
+      for (const cropRatio of [0.85, 0.70, 0.55, 0.40]) {
+        const cropW = Math.max(1, Math.round(sourceW * cropRatio));
+        const cropH = Math.max(1, Math.round(sourceH * cropRatio));
+        const sx = Math.max(0, Math.round((sourceW - cropW) / 2));
+        const sy = Math.max(0, Math.round((sourceH - cropH) / 2));
+        const canvas = document.createElement("canvas");
+        const ratio = Math.min(1800 / Math.max(cropW, cropH), 1);
+        canvas.width = Math.max(1, Math.round(cropW * ratio));
+        canvas.height = Math.max(1, Math.round(cropH * ratio));
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
+        let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
+        if (qr && qr.data) return qr.data;
+        const d = data.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const gray = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) | 0;
+          const v = gray > 145 ? 255 : 0;
+          d[i] = d[i+1] = d[i+2] = v;
+        }
+        qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
+        if (qr && qr.data) return qr.data;
+      }
     } finally {
       try { URL.revokeObjectURL(img.src); } catch (_) {}
     }
@@ -1869,6 +1896,7 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 </script>
+<script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
 /* Rafraîchir le bloc validation quand le pot sélectionné change */
