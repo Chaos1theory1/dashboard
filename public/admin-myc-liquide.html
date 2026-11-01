@@ -463,6 +463,7 @@
 .lc-pot-row-journal{background:#3498db}
 .lc-pot-row-storage{background:#21618c}
 .lc-pot-row-resume{background:#6c757d}
+.lc-pot-row-label{background:#6f42c1}
 .lc-pot-row-delete{background:#c0392b}
 .lc-lot-actions-line{
   display:flex;
@@ -2102,6 +2103,40 @@ function lcPotFrigoButtonHtml(p,lotId){
 function potCodeRow(p){
   return p.code || p.pot_code || `Pot ${p.pot_number || p.numero || p.id || ''}`;
 }
+async function printLcLotLabelsFromMain(lotId){
+  lotId=Number(lotId);
+  if(!lotId)return alert('Lot LC introuvable.');
+  try{
+    let lot=(lcLotsCache||[]).find(x=>Number(x.id)===lotId);
+    if(!lot) lot=await getJSON(`/api/lc-workflow/lots/${lotId}`);
+    let pots=expandedLcPotsCache.get(lotId);
+    if(!Array.isArray(pots) || !pots.length) pots=await getPotsForLotColumn(lotId);
+    pots=Array.isArray(pots)?pots:[];
+    if(!pots.length)return alert('Aucun pot LC trouvé pour ce lot.');
+    printLcPotLabels(lot,pots);
+  }catch(e){
+    alert('❌ Impression étiquettes : '+(e.message||e));
+  }
+}
+
+async function printLcSinglePotLabelFromMain(lotId,potId){
+  lotId=Number(lotId);
+  potId=Number(potId);
+  if(!lotId||!potId)return alert('Pot LC introuvable.');
+  try{
+    let lot=(lcLotsCache||[]).find(x=>Number(x.id)===lotId);
+    if(!lot) lot=await getJSON(`/api/lc-workflow/lots/${lotId}`);
+    let pots=expandedLcPotsCache.get(lotId);
+    if(!Array.isArray(pots) || !pots.length) pots=await getPotsForLotColumn(lotId);
+    pots=Array.isArray(pots)?pots:[];
+    const pot=pots.find(x=>Number(x.id||x.pot_id||x.lc_pot_id)===potId);
+    if(!pot)return alert('Pot LC introuvable.');
+    printLcPotLabels(lot,[pot]);
+  }catch(e){
+    alert('❌ Impression étiquette : '+(e.message||e));
+  }
+}
+
 function renderPotRowsUnderLot(lot,pots){
   if(!pots || !pots.length){
     return `<tr class="lc-pot-no-row">
@@ -2137,6 +2172,7 @@ function renderPotRowsUnderLot(lot,pots){
           <a class="lc-pot-row-journal" href="admin-lc-cycle.html?lc_id=${lot.id}&pot_id=${potId}&mode=journal">Journal</a>
           ${lcPotFrigoButtonHtml(p,lot.id)}
           <button type="button" class="lc-pot-row-resume" onclick="resumeLcPotColumn(${lot.id},${potId})">Résumé</button>
+          <button type="button" class="lc-pot-row-label" onclick="printLcSinglePotLabelFromMain(${lot.id},${potId})">🏷️ Étiquette</button>
           <button type="button" class="lc-pot-row-delete" onclick="deleteLcPotColumn(${lot.id},${potId})">Supprimer pot</button>
         </div>
       </td>
@@ -2200,6 +2236,7 @@ function renderLotsPage(){
       <td><span class="badge-pill warn">J${l.jour_actuel??0}</span></td>
       <td><div class="lc-lot-actions-line">
         <button class="btn-action btn-blue" style="max-width:160px;padding:8px 12px" onclick="window.location.href='admin-lc-cycle.html?lc_id=${l.id}'">Journal lot</button>
+        <button class="btn-action btn-purple" style="max-width:140px;padding:8px 12px" onclick="printLcLotLabelsFromMain(${Number(l.id)})">🏷️ Étiquette</button>
         <button class="btn-delete-lc" onclick="deleteLcLot(${Number(l.id)})">Supprimer lot</button>
       </div></td>
     </tr>${potRows}`;
