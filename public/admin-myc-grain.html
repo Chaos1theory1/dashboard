@@ -239,6 +239,20 @@
     @media(max-width:700px){.grain-scan-inline-actions{grid-template-columns:1fr}.grain-scan-inline-card{padding:16px}.grain-scan-inline-card h2{font-size:21px}}
 
   </style>
+
+<style id="mtd-live-qr-style">
+.mtd-live-qr-modal{position:fixed;inset:0;z-index:1000002;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72)}
+.mtd-live-qr-modal.open{display:flex}
+.mtd-live-qr-card{width:min(520px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:18px;padding:16px;box-shadow:0 22px 70px rgba(0,0,0,.35)}
+.mtd-live-qr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.mtd-live-qr-head h3{margin:0;font-size:19px;font-weight:900;color:#1f7a41}
+.mtd-live-qr-close{border:0;border-radius:9px;padding:8px 11px;background:#c0392b;color:#fff;font-weight:900;cursor:pointer}
+.mtd-live-qr-reader{width:100%;min-height:300px;border-radius:12px;overflow:hidden;background:#111}
+.mtd-live-qr-reader video{width:100%!important;height:auto!important;border-radius:12px}
+.mtd-live-qr-help{margin-top:10px;color:#667085;font-size:12px;line-height:1.4;font-weight:700}
+.mtd-live-qr-status{margin-top:9px;color:#1f7a41;font-size:12px;font-weight:900;min-height:18px}
+</style>
+
 </head>
 <body>
 
@@ -261,7 +275,7 @@
         />
         <div class="grain-scan-inline-actions">
           <button type="button" class="grain-scan-inline-btn secondary" id="grain-scan-camera-btn">Scanner QR</button>
-          <label class="grain-scan-inline-btn blue" for="grain-scan-inline-file" style="display:flex;align-items:center;justify-content:center;margin:0!important;;color:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important">Importer image QR</label>
+          <label class="grain-scan-inline-btn blue" for="grain-scan-inline-file" style="display:flex;align-items:center;justify-content:center;margin:0!important;">Importer image QR</label>
           <button type="button" class="grain-scan-inline-btn" id="grain-scan-open-btn">Ouvrir journal grain</button>
           <input id="grain-scan-inline-file" class="grain-scan-inline-file" type="file" accept="image/*" />
           <input id="grain-scan-inline-camera-file" class="grain-scan-inline-file" type="file" accept="image/*" capture="environment" />
@@ -646,7 +660,87 @@
     document.addEventListener('click',e=>{if(!e.target.closest('.grain-header-filter'))closeGrainHeaderFilters();});
     function htmlTableDownload(filename,title,headers,rows){
       const table=`<table border="1"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-      const html=`<html><head><meta charset="utf-8"></head><body><h3>${esc(title)}</h3>${table}</body></html>`;
+      const html=`<html><head><meta charset="utf-8"></head><body><h3>${esc(title)}</h3>${table}
+<div id="mtd-live-qr-modal" class="mtd-live-qr-modal" onclick="if(event.target===this) stopMtdLiveQrScanner()">
+  <div class="mtd-live-qr-card" role="dialog" aria-modal="true" aria-label="Scanner QR">
+    <div class="mtd-live-qr-head">
+      <h3>Scanner QR</h3>
+      <button type="button" class="mtd-live-qr-close" onclick="stopMtdLiveQrScanner()">Fermer</button>
+    </div>
+    <div id="mtd-live-qr-reader" class="mtd-live-qr-reader"></div>
+    <div class="mtd-live-qr-help">Place le QR au centre de l’image. Le journal s’ouvrira automatiquement dès que le code sera reconnu.</div>
+    <div id="mtd-live-qr-status" class="mtd-live-qr-status"></div>
+  </div>
+</div>
+
+
+<script id="mtd-live-qr-script">
+(function(){
+  let mtdLiveQrScanner = null;
+  let mtdLiveQrBusy = false;
+  let mtdLiveQrOnSuccess = null;
+
+  function mtdQrStatus(msg){ const el=document.getElementById('mtd-live-qr-status'); if(el) el.textContent=msg||''; }
+
+  async function waitForHtml5Qr(timeoutMs=6000){
+    const start=Date.now();
+    while(!window.Html5Qrcode && Date.now()-start<timeoutMs){ await new Promise(r=>setTimeout(r,80)); }
+    if(!window.Html5Qrcode) throw new Error('Bibliothèque QR non chargée. Recharge la page.');
+  }
+
+  async function startMtdLiveQrScanner(onSuccess){
+    if(mtdLiveQrBusy) return;
+    mtdLiveQrBusy=true;
+    mtdLiveQrOnSuccess=onSuccess;
+    const modal=document.getElementById('mtd-live-qr-modal');
+    const reader=document.getElementById('mtd-live-qr-reader');
+    if(!modal||!reader){ mtdLiveQrBusy=false; throw new Error('Lecteur QR introuvable.'); }
+    modal.classList.add('open');
+    mtdQrStatus('Ouverture de la caméra arrière…');
+    try{
+      await waitForHtml5Qr();
+      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
+      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
+      reader.innerHTML='';
+      mtdLiveQrScanner=new Html5Qrcode('mtd-live-qr-reader');
+      const config={fps:12, qrbox:function(vw,vh){ const s=Math.floor(Math.min(vw,vh)*0.72); return {width:s,height:s}; }, aspectRatio:1.0};
+      await mtdLiveQrScanner.start(
+        {facingMode:{ideal:'environment'}},
+        config,
+        async function(decodedText){
+          if(!decodedText || !mtdLiveQrOnSuccess) return;
+          const cb=mtdLiveQrOnSuccess;
+          mtdLiveQrOnSuccess=null;
+          mtdQrStatus('QR détecté. Ouverture…');
+          await stopMtdLiveQrScanner();
+          try{ await cb(decodedText); }catch(e){ console.error(e); }
+        },
+        function(){ /* scan frames without QR are normal */ }
+      );
+      mtdQrStatus('Caméra active — vise le QR.');
+    }catch(e){
+      console.error('Live QR scanner:',e);
+      mtdQrStatus('Impossible d’ouvrir la caméra : '+(e?.message||e));
+      mtdLiveQrBusy=false;
+    }
+  }
+
+  async function stopMtdLiveQrScanner(){
+    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
+    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
+    mtdLiveQrScanner=null;
+    mtdLiveQrBusy=false;
+    mtdLiveQrOnSuccess=null;
+    document.getElementById('mtd-live-qr-modal')?.classList.remove('open');
+    const reader=document.getElementById('mtd-live-qr-reader'); if(reader) reader.innerHTML='';
+  }
+
+  window.startMtdLiveQrScanner=startMtdLiveQrScanner;
+  window.stopMtdLiveQrScanner=stopMtdLiveQrScanner;
+})();
+</script>
+
+</body></html>`;
       const blob=new Blob(['\ufeff',html],{type:'application/vnd.ms-excel;charset=utf-8;'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename+'.xls';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
     }
     function pdfTableDownload(filename,title,headers,rows){
@@ -1513,7 +1607,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
       $('date-preparation').value=today();$('seed-date').value=today();
 
       $('grain-scan-open-btn')?.addEventListener('click',()=>openScannedGrainValue($('grain-scan-inline-code')?.value||''));
-      $('grain-scan-camera-btn')?.addEventListener('click',()=>{setGrainScanInlineMsg('Ouverture appareil photo... Prends le QR en photo.',false);$('grain-scan-inline-camera-file')?.click();});
+      $('grain-scan-camera-btn')?.addEventListener('click',()=>{setGrainScanInlineMsg('Caméra active — vise le QR.',false);startMtdLiveQrScanner(async code=>{const box=$('grain-scan-inline-code');if(box)box.value=code;await openScannedGrainValue(code);}).catch(e=>setGrainScanInlineMsg('❌ '+(e.message||e)));});
       $('grain-scan-inline-file')?.addEventListener('change',e=>handleGrainQrFileInput(e.currentTarget));
       $('grain-scan-inline-camera-file')?.addEventListener('change',e=>handleGrainQrFileInput(e.currentTarget));
       $('grain-scan-inline-code')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();openScannedGrainValue(e.currentTarget.value);}});

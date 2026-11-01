@@ -273,11 +273,7 @@
 }
 .lc-scan-inline-btn.blue {
   background: #0d6efd;
-  color: #fff !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
+  color:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;
 }
 .lc-scan-inline-actions button,
 .lc-scan-inline-actions label {
@@ -856,6 +852,20 @@
   html.mtd-shell-loading .admin-menu-bar { display:none !important; }
 </style>
 <script>document.documentElement.classList.add('mtd-shell-loading');</script>
+
+
+<style id="mtd-live-qr-style">
+.mtd-live-qr-modal{position:fixed;inset:0;z-index:1000002;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72)}
+.mtd-live-qr-modal.open{display:flex}
+.mtd-live-qr-card{width:min(520px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:18px;padding:16px;box-shadow:0 22px 70px rgba(0,0,0,.35)}
+.mtd-live-qr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.mtd-live-qr-head h3{margin:0;font-size:19px;font-weight:900;color:#1f7a41}
+.mtd-live-qr-close{border:0;border-radius:9px;padding:8px 11px;background:#c0392b;color:#fff;font-weight:900;cursor:pointer}
+.mtd-live-qr-reader{width:100%;min-height:300px;border-radius:12px;overflow:hidden;background:#111}
+.mtd-live-qr-reader video{width:100%!important;height:auto!important;border-radius:12px}
+.mtd-live-qr-help{margin-top:10px;color:#667085;font-size:12px;line-height:1.4;font-weight:700}
+.mtd-live-qr-status{margin-top:9px;color:#1f7a41;font-size:12px;font-weight:900;min-height:18px}
+</style>
 
 </head>
 <body>
@@ -1500,7 +1510,87 @@ function printSolution(){
 <p><strong>Isolation :</strong> ${esc(document.getElementById('solution-p3-readonly').value)}</p><p><strong>Nom :</strong> ${esc(document.getElementById('solution-name').value)}</p>
   <table><thead><tr><th>Composant</th><th>g/L</th></tr></thead><tbody>${comps.map(c=>`<tr><td>${esc(c.nom)}</td><td>${esc(c.qte)}</td></tr>`).join('')}</tbody></table>
   <p><strong>Volume préparé :</strong> ${esc(document.getElementById('solution-volume-total-l').value)} L</p><p><strong>Disponible :</strong> ${esc(document.getElementById('solution-volume-dispo-l').value)} L</p>
-  <h3>Protocole</h3><pre>${esc(document.getElementById('solution-protocole').value)}</pre></body></html>`;
+  <h3>Protocole</h3><pre>${esc(document.getElementById('solution-protocole').value)}</pre>
+<div id="mtd-live-qr-modal" class="mtd-live-qr-modal" onclick="if(event.target===this) stopMtdLiveQrScanner()">
+  <div class="mtd-live-qr-card" role="dialog" aria-modal="true" aria-label="Scanner QR">
+    <div class="mtd-live-qr-head">
+      <h3>Scanner QR</h3>
+      <button type="button" class="mtd-live-qr-close" onclick="stopMtdLiveQrScanner()">Fermer</button>
+    </div>
+    <div id="mtd-live-qr-reader" class="mtd-live-qr-reader"></div>
+    <div class="mtd-live-qr-help">Place le QR au centre de l’image. Le journal s’ouvrira automatiquement dès que le code sera reconnu.</div>
+    <div id="mtd-live-qr-status" class="mtd-live-qr-status"></div>
+  </div>
+</div>
+
+
+<script id="mtd-live-qr-script">
+(function(){
+  let mtdLiveQrScanner = null;
+  let mtdLiveQrBusy = false;
+  let mtdLiveQrOnSuccess = null;
+
+  function mtdQrStatus(msg){ const el=document.getElementById('mtd-live-qr-status'); if(el) el.textContent=msg||''; }
+
+  async function waitForHtml5Qr(timeoutMs=6000){
+    const start=Date.now();
+    while(!window.Html5Qrcode && Date.now()-start<timeoutMs){ await new Promise(r=>setTimeout(r,80)); }
+    if(!window.Html5Qrcode) throw new Error('Bibliothèque QR non chargée. Recharge la page.');
+  }
+
+  async function startMtdLiveQrScanner(onSuccess){
+    if(mtdLiveQrBusy) return;
+    mtdLiveQrBusy=true;
+    mtdLiveQrOnSuccess=onSuccess;
+    const modal=document.getElementById('mtd-live-qr-modal');
+    const reader=document.getElementById('mtd-live-qr-reader');
+    if(!modal||!reader){ mtdLiveQrBusy=false; throw new Error('Lecteur QR introuvable.'); }
+    modal.classList.add('open');
+    mtdQrStatus('Ouverture de la caméra arrière…');
+    try{
+      await waitForHtml5Qr();
+      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
+      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
+      reader.innerHTML='';
+      mtdLiveQrScanner=new Html5Qrcode('mtd-live-qr-reader');
+      const config={fps:12, qrbox:function(vw,vh){ const s=Math.floor(Math.min(vw,vh)*0.72); return {width:s,height:s}; }, aspectRatio:1.0};
+      await mtdLiveQrScanner.start(
+        {facingMode:{ideal:'environment'}},
+        config,
+        async function(decodedText){
+          if(!decodedText || !mtdLiveQrOnSuccess) return;
+          const cb=mtdLiveQrOnSuccess;
+          mtdLiveQrOnSuccess=null;
+          mtdQrStatus('QR détecté. Ouverture…');
+          await stopMtdLiveQrScanner();
+          try{ await cb(decodedText); }catch(e){ console.error(e); }
+        },
+        function(){ /* scan frames without QR are normal */ }
+      );
+      mtdQrStatus('Caméra active — vise le QR.');
+    }catch(e){
+      console.error('Live QR scanner:',e);
+      mtdQrStatus('Impossible d’ouvrir la caméra : '+(e?.message||e));
+      mtdLiveQrBusy=false;
+    }
+  }
+
+  async function stopMtdLiveQrScanner(){
+    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
+    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
+    mtdLiveQrScanner=null;
+    mtdLiveQrBusy=false;
+    mtdLiveQrOnSuccess=null;
+    document.getElementById('mtd-live-qr-modal')?.classList.remove('open');
+    const reader=document.getElementById('mtd-live-qr-reader'); if(reader) reader.innerHTML='';
+  }
+
+  window.startMtdLiveQrScanner=startMtdLiveQrScanner;
+  window.stopMtdLiveQrScanner=stopMtdLiveQrScanner;
+})();
+</script>
+
+</body></html>`;
   let w=window.open('', '_blank');w.document.write(html);w.document.close();w.focus();w.print();
 }
 
@@ -2589,13 +2679,12 @@ function openScannedLcPotInline() {
 }
 
 function startLcInlineQrCamera() {
-  let cameraInput = document.getElementById("lc-scan-inline-camera-file");
-  if (!cameraInput) {
-    setLcScanInlineMsg("Champ caméra introuvable. Recharge la page.");
-    return;
-  }
-  setLcScanInlineMsg("Ouverture appareil photo... Prends le QR en photo.", false);
-  cameraInput.click();
+  setLcScanInlineMsg("Caméra active — vise le QR.", false);
+  startMtdLiveQrScanner(async function(code){
+    const input=document.getElementById("lc-scan-inline-code");
+    if(input) input.value=code;
+    await openScannedLcValue(code);
+  }).catch(function(e){ setLcScanInlineMsg("❌ "+(e.message||e)); });
 }
 
 function waitForLcQrLibraries(timeoutMs = 3500) {
