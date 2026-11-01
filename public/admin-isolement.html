@@ -2822,6 +2822,12 @@ ${labels}
         const petri = currentPetris.find(function(p) { return Number(p.id) === Number(petriId); }) || await resolvePetriById(petriId);
         if (!petri) return alert("Boîte introuvable");
         const info = getStockExpiryInfo(petri);
+        let sourceIso = null;
+        try {
+          sourceIso = await apiGet("/api/isolements/" + Number(petri.isolement_id || selectedIsoId));
+        } catch (_) {
+          sourceIso = (selectedIso && Number(selectedIso.id) === Number(petri.isolement_id || selectedIsoId)) ? selectedIso : null;
+        }
         let album = [];
         try {
           const r = await apiGet("/api/petris/" + Number(petriId) + "/album");
@@ -2834,6 +2840,8 @@ ${labels}
           '<div class="info-grid" style="margin-top:0;">' +
             '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Boîte</div><div class="info-value">' + htmlEscape(getPetriCode(petri)) + '</div></div>' +
             '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Phase</div><div class="info-value">P' + htmlEscape(petri.phase || '—') + '</div></div>' +
+            '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Espèce</div><div class="info-value">' + htmlEscape((sourceIso && sourceIso.espece) || '—') + '</div></div>' +
+            '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Champignon / souche</div><div class="info-value">' + htmlEscape((sourceIso && sourceIso.champignon) || '—') + '</div></div>' +
             '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Date J0</div><div class="info-value">' + htmlEscape(formatJ0TableEtEtiquette(petri.j0)) + '</div></div>' +
             '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Date limite conservation</div><div class="info-value">' + htmlEscape(info.limitText || 'À renseigner') + '</div></div>' +
             '<div class="info-item" style="background:#eefaff;color:#123;"><div class="info-label">Traitement du jour courant</div><div class="info-value">' + (petri.is_today_treated ? '✅ Jour courant traité' : '⏳ Jour courant non traité') + '</div></div>' +

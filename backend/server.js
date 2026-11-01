@@ -3526,11 +3526,13 @@ app.get("/api/isolements/:id", async (req, res) => {
     if (!id) return res.status(400).json({ error: "id invalide" });
 
     const sql = `
-      SELECT id, code, champignon, cycle_type, categorie, origine, infos,
-             agar, date_prepa, date_prelev, date_exp, operateur,
-             solution_lc, statut, global_status, created_at, updated_at, espece_id, variety_id
-      FROM isolements
-      WHERE id = $1
+      SELECT i.id, i.code, i.champignon, i.cycle_type, i.categorie, i.origine, i.infos,
+             i.agar, i.date_prepa, i.date_prelev, i.date_exp, i.operateur,
+             i.solution_lc, i.statut, i.global_status, i.created_at, i.updated_at, i.espece_id, i.variety_id,
+             e.nom_scientifique AS espece, e.nom_commun AS espece_nom_commun
+      FROM isolements i
+      LEFT JOIN especes e ON e.id_espece = i.espece_id
+      WHERE i.id = $1
       LIMIT 1;
     `;
     const r = await pool.query(sql, [id]);
@@ -4775,12 +4777,14 @@ async function lcLotWithComputedFields(lotId) {
   await ensureLcPotWorkflowSchema();
   const r = await pool.query(`
     SELECT l.*,
-           i.code AS iso_code, i.champignon AS iso_champignon, i.origine AS iso_origine, i.cycle_type,
+           i.code AS iso_code, i.champignon AS iso_champignon, i.origine AS iso_origine, i.cycle_type, i.espece_id,
+           e.nom_scientifique AS espece, e.nom_commun AS espece_nom_commun,
            p.phase AS source_phase, p.status AS source_status,
            sn.nom AS solution_nom, sn.volume_final_ml AS solution_volume_ml,
            (SELECT COUNT(*)::int FROM lc_pots pp WHERE pp.lc_lot_id=l.id AND pp.deleted_at IS NULL) AS pots_count
     FROM lc_lots l
     LEFT JOIN isolements i ON i.id = l.parent_iso_id
+    LEFT JOIN especes e ON e.id_espece = i.espece_id
     LEFT JOIN iso_petris p ON p.id = l.source_petri_id
     LEFT JOIN solution_nutritive sn ON sn.id = l.solution_id
     WHERE l.id=$1
@@ -4799,7 +4803,9 @@ async function lcLotWithComputedFields(lotId) {
     lot_code: lot.code,
     parent_iso_id: lot.parent_iso_id,
     isolation_id: lot.parent_iso_id,
-    champignon: lot.champignon || lot.iso_champignon || '',
+    espece: lot.espece || '',
+    espece_nom_commun: lot.espece_nom_commun || '',
+    champignon: lot.iso_champignon || lot.champignon || '',
     origine: lot.origine || lot.iso_origine || '',
     j0_date: lot.j0_date,
     prepared_on: lot.j0_date,
@@ -6256,7 +6262,9 @@ app.get('/api/grain-units', async (req, res) => {
              b.code AS batch_code,
              b.parent_iso_id,
              b.parent_iso_code,
-             b.champignon,
+             COALESCE(i.champignon, b.champignon, '') AS champignon,
+             e.nom_scientifique AS espece,
+             e.nom_commun AS espece_nom_commun,
              b.type_grain,
              b.date_preparation,
              b.lc_code AS batch_lc_code,
@@ -6276,6 +6284,8 @@ app.get('/api/grain-units', async (req, res) => {
              last_j.treated_at AS last_treated_at
       FROM myc_grain_units u
       JOIN myc_grain_batches b ON b.id=u.batch_id
+      LEFT JOIN isolements i ON i.id = b.parent_iso_id
+      LEFT JOIN especes e ON e.id_espece = i.espece_id
       LEFT JOIN lc_lots ll ON ll.id = COALESCE(u.lc_lot_id, b.lc_lot_id)
       LEFT JOIN iso_petris sp ON sp.id = COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id)
       LEFT JOIN LATERAL (
@@ -6318,7 +6328,9 @@ app.get('/api/grain-units/:id/summary', async (req, res) => {
         b.code AS batch_code,
         b.parent_iso_id,
         b.parent_iso_code,
-        b.champignon,
+        COALESCE(i.champignon, b.champignon, '') AS champignon,
+        e.nom_scientifique AS espece,
+        e.nom_commun AS espece_nom_commun,
         b.type_grain,
         b.date_preparation,
         b.notes AS batch_notes,
@@ -6338,6 +6350,8 @@ app.get('/api/grain-units/:id/summary', async (req, res) => {
         ) AS resolved_p3_code
       FROM myc_grain_units u
       JOIN myc_grain_batches b ON b.id = u.batch_id
+      LEFT JOIN isolements i ON i.id = b.parent_iso_id
+      LEFT JOIN especes e ON e.id_espece = i.espece_id
       LEFT JOIN lc_lots ll ON ll.id = COALESCE(u.lc_lot_id, b.lc_lot_id)
       LEFT JOIN iso_petris sp
         ON sp.id = COALESCE(u.source_petri_id, b.source_petri_id, ll.source_petri_id)

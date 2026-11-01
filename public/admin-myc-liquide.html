@@ -1930,6 +1930,8 @@ async function resumeLcPotColumn(lotId,potId){
         <div class="lc-summary-grid">
           ${lcSummaryValue('Lot LC',esc(lotCode || ('LC #'+lotId)))}
           ${lcSummaryValue('Pot',esc(potCode))}
+          ${lcSummaryValue('Espèce',esc(lot.espece || '—'))}
+          ${lcSummaryValue('Champignon / souche',esc(lot.champignon || '—'))}
           ${lcSummaryValue('Source P3',esc(lot.source_petri_id ? 'P3-'+lot.source_petri_id : '—'))}
           ${lcSummaryValue('Solution',esc(lot.solution?.nom || lot.solution_lot_code || '—'))}
           ${lcSummaryValue('Statut',esc(p.status || p.statut || 'ACTIF'))}

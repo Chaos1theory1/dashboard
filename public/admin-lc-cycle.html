@@ -797,7 +797,8 @@ function renderHeader(){
   document.getElementById('info-grid').innerHTML = `
     <div class="info-item"><div class="info-label">LC Ref</div><div class="info-value">${esc(lcData.code||'—')}</div></div>
     <div class="info-item"><div class="info-label">Jour actuel</div><div class="info-value">J${Math.min(currentDay,maxDay())}</div></div>
-    <div class="info-item"><div class="info-label">Champignon</div><div class="info-value">${esc(lcData.champignon||'—')}</div></div>
+    <div class="info-item"><div class="info-label">Espèce</div><div class="info-value">${esc(lcData.espece||'—')}</div></div>
+    <div class="info-item"><div class="info-label">Champignon / souche</div><div class="info-value">${esc(lcData.champignon||'—')}</div></div>
     <div class="info-item"><div class="info-label">Solution</div><div class="info-value">${esc(lcData.solution?.nom||lcData.solution_lot_code||'—')}</div></div>
     <div class="info-item"><div class="info-label">J0</div><div class="info-value">${esc(String(lcData.j0_date||'').slice(0,10))}</div></div>
     <div class="info-item"><div class="info-label">Pots actifs</div><div class="info-value">${pots.length}</div></div>`;
@@ -1275,6 +1276,8 @@ function renderSummary(){
   box.innerHTML=`
     <h5 style="font-weight:900;color:#21618c;margin:0 0 10px;">📋 Résumé du pot ${esc(selectedPot.code||'')}</h5>
     <div class="grid">
+      <div><strong>Espèce</strong><br>${esc(lcData?.espece||'—')}</div>
+      <div><strong>Champignon / souche</strong><br>${esc(lcData?.champignon||'—')}</div>
       <div><strong>Statut</strong><br>${selectedPotStored()?'STOCK / FRIGO':esc(selectedPot.status||'—')}</div>
       <div><strong>Traitement</strong><br>${selectedPotStored()?'✅ Terminé':'En cours'}</div>
       <div><strong>Jours traités</strong><br>${rows.length}</div>
