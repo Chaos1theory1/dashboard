@@ -1192,8 +1192,9 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
           const jour=u.last_day_index!=null?'J'+esc(u.last_day_index):'J0';
           const propagation=u.last_propagation_pct!=null?esc(u.last_propagation_pct)+' %':'—';
           const score=u.last_score20!=null?'score '+esc(u.last_score20)+'/20':'';
+          const summaryAction=`<button type="button" onclick="event.stopPropagation();openSummaryForUnit(${id});this.closest('details').removeAttribute('open')">📋 Résumé</button>`;
           const stockAction=isUnitStored(u)
-            ?`<button type="button" onclick="event.stopPropagation();openSummaryForUnit(${id});this.closest('details').removeAttribute('open')">📦 Résumé</button>`
+            ?''
             :`<button type="button" onclick="event.stopPropagation();stockUnit(${id});this.closest('details').removeAttribute('open')">📦 Stockage</button>`;
           const canSell=['PRET','STOCK'].includes(canonicalGrainStatus(u.statut));
           const soldAction=`<button type="button" class="grain-sold-action" ${canSell?'': 'disabled title="Disponible uniquement lorsque le statut est Prêt ou Stocké"'} onclick="event.stopPropagation();markGrainUnitSold(${id});this.closest('details').removeAttribute('open')">💶 Vendu</button>`;
@@ -1207,7 +1208,7 @@ Le pot/sac sera retiré de la liste active, mais restera conservé dans la base 
             <td><strong>${jour}</strong><div class="grain-small">${u.last_treated_at?fmtDate(u.last_treated_at):'non suivi'}</div></td>
             <td><strong>${propagation}</strong><div class="grain-small">${score}</div></td>
             <td>${statusBadge(u.statut)}</td>
-            <td style="overflow:visible"><details class="grain-actions-menu" onclick="event.stopPropagation()"><summary aria-label="Actions">⋯</summary><div class="grain-actions-popover"><button type="button" onclick="openJournalForUnit(${id});this.closest('details').removeAttribute('open')">📒 Journal</button>${stockAction}<button type="button" onclick="printGrainUnitLabelsById(${id});this.closest('details').removeAttribute('open')">🏷️ Étiquette</button>${soldAction}${deleteAction}</div></details></td>
+            <td style="overflow:visible"><details class="grain-actions-menu" onclick="event.stopPropagation()"><summary aria-label="Actions">⋯</summary><div class="grain-actions-popover"><button type="button" onclick="openJournalForUnit(${id});this.closest('details').removeAttribute('open')">📒 Journal</button>${summaryAction}${stockAction}<button type="button" onclick="printGrainUnitLabelsById(${id});this.closest('details').removeAttribute('open')">🏷️ Étiquette</button>${soldAction}${deleteAction}</div></details></td>
           </tr>
           <tr class="grain-history-detail-row" id="grain-history-detail-${id}"><td colspan="8"><div class="grain-history-detail-grid">
             <div class="grain-history-detail-item"><div class="grain-history-detail-label">Lot complet</div><div class="grain-history-detail-value">${esc(u.code)}</div></div>
