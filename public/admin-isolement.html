@@ -611,7 +611,6 @@
     }
     .scan-inline-btn.blue {
       background: #0d6efd;
-      color:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;
     }
     .scan-inline-msg {
       margin-top: 12px;
@@ -767,20 +766,6 @@
 .btn-petri-exhausted{border:0;border-radius:8px;padding:10px 16px;background:#8a5a18;color:#fff;font-weight:800;cursor:pointer;}
 .btn-petri-exhausted:hover{background:#70470f;}
 </style>
-
-<style id="mtd-live-qr-style">
-.mtd-live-qr-modal{position:fixed;inset:0;z-index:1000002;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72)}
-.mtd-live-qr-modal.open{display:flex}
-.mtd-live-qr-card{width:min(520px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:18px;padding:16px;box-shadow:0 22px 70px rgba(0,0,0,.35)}
-.mtd-live-qr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
-.mtd-live-qr-head h3{margin:0;font-size:19px;font-weight:900;color:#1f7a41}
-.mtd-live-qr-close{border:0;border-radius:9px;padding:8px 11px;background:#c0392b;color:#fff;font-weight:900;cursor:pointer}
-.mtd-live-qr-reader{width:100%;min-height:300px;border-radius:12px;overflow:hidden;background:#111}
-.mtd-live-qr-reader video{width:100%!important;height:auto!important;border-radius:12px}
-.mtd-live-qr-help{margin-top:10px;color:#667085;font-size:12px;line-height:1.4;font-weight:700}
-.mtd-live-qr-status{margin-top:9px;color:#1f7a41;font-size:12px;font-weight:900;min-height:18px}
-</style>
-
 </head>
 
 <body>
@@ -843,7 +828,7 @@
         Ouvrir journal
       </button>
       <button type="button" class="scan-inline-btn secondary" onclick="startInlineQrCamera()">
-        Scanner QR
+        Caméra
       </button>
       <label class="scan-inline-btn blue" for="scan-inline-file" style="text-align:center;">
         Importer image QR
@@ -2231,86 +2216,6 @@
 <script>
   window.onload = function(){ setTimeout(function(){ window.print(); }, 250); };
 <\/script>
-
-<div id="mtd-live-qr-modal" class="mtd-live-qr-modal" onclick="if(event.target===this) stopMtdLiveQrScanner()">
-  <div class="mtd-live-qr-card" role="dialog" aria-modal="true" aria-label="Scanner QR">
-    <div class="mtd-live-qr-head">
-      <h3>Scanner QR</h3>
-      <button type="button" class="mtd-live-qr-close" onclick="stopMtdLiveQrScanner()">Fermer</button>
-    </div>
-    <div id="mtd-live-qr-reader" class="mtd-live-qr-reader"></div>
-    <div class="mtd-live-qr-help">Place le QR au centre de l’image. Le journal s’ouvrira automatiquement dès que le code sera reconnu.</div>
-    <div id="mtd-live-qr-status" class="mtd-live-qr-status"></div>
-  </div>
-</div>
-
-
-<script id="mtd-live-qr-script">
-(function(){
-  let mtdLiveQrScanner = null;
-  let mtdLiveQrBusy = false;
-  let mtdLiveQrOnSuccess = null;
-
-  function mtdQrStatus(msg){ const el=document.getElementById('mtd-live-qr-status'); if(el) el.textContent=msg||''; }
-
-  async function waitForHtml5Qr(timeoutMs=6000){
-    const start=Date.now();
-    while(!window.Html5Qrcode && Date.now()-start<timeoutMs){ await new Promise(r=>setTimeout(r,80)); }
-    if(!window.Html5Qrcode) throw new Error('Bibliothèque QR non chargée. Recharge la page.');
-  }
-
-  async function startMtdLiveQrScanner(onSuccess){
-    if(mtdLiveQrBusy) return;
-    mtdLiveQrBusy=true;
-    mtdLiveQrOnSuccess=onSuccess;
-    const modal=document.getElementById('mtd-live-qr-modal');
-    const reader=document.getElementById('mtd-live-qr-reader');
-    if(!modal||!reader){ mtdLiveQrBusy=false; throw new Error('Lecteur QR introuvable.'); }
-    modal.classList.add('open');
-    mtdQrStatus('Ouverture de la caméra arrière…');
-    try{
-      await waitForHtml5Qr();
-      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
-      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
-      reader.innerHTML='';
-      mtdLiveQrScanner=new Html5Qrcode('mtd-live-qr-reader');
-      const config={fps:12, qrbox:function(vw,vh){ const s=Math.floor(Math.min(vw,vh)*0.72); return {width:s,height:s}; }, aspectRatio:1.0};
-      await mtdLiveQrScanner.start(
-        {facingMode:{ideal:'environment'}},
-        config,
-        async function(decodedText){
-          if(!decodedText || !mtdLiveQrOnSuccess) return;
-          const cb=mtdLiveQrOnSuccess;
-          mtdLiveQrOnSuccess=null;
-          mtdQrStatus('QR détecté. Ouverture…');
-          await stopMtdLiveQrScanner();
-          try{ await cb(decodedText); }catch(e){ console.error(e); }
-        },
-        function(){ /* scan frames without QR are normal */ }
-      );
-      mtdQrStatus('Caméra active — vise le QR.');
-    }catch(e){
-      console.error('Live QR scanner:',e);
-      mtdQrStatus('Impossible d’ouvrir la caméra : '+(e?.message||e));
-      mtdLiveQrBusy=false;
-    }
-  }
-
-  async function stopMtdLiveQrScanner(){
-    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
-    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
-    mtdLiveQrScanner=null;
-    mtdLiveQrBusy=false;
-    mtdLiveQrOnSuccess=null;
-    document.getElementById('mtd-live-qr-modal')?.classList.remove('open');
-    const reader=document.getElementById('mtd-live-qr-reader'); if(reader) reader.innerHTML='';
-  }
-
-  window.startMtdLiveQrScanner=startMtdLiveQrScanner;
-  window.stopMtdLiveQrScanner=stopMtdLiveQrScanner;
-})();
-</script>
-
 </body>
 </html>`;
         w.document.open();
@@ -4028,12 +3933,14 @@ ${labels}
 
 
       function startInlineQrCamera() {
-        setScanInlineMsg("Caméra active — vise le QR.", false);
-        startMtdLiveQrScanner(async function(code){
-          const input=document.getElementById("scan-inline-code");
-          if(input) input.value=code;
-          await openScannedBoxInline();
-        }).catch(function(e){ setScanInlineMsg("❌ "+(e.message||e)); });
+        const cameraInput = document.getElementById("scan-inline-camera-file");
+        if (!cameraInput) {
+          setScanInlineMsg("Champ caméra introuvable. Recharge la page.");
+          return;
+        }
+
+        setScanInlineMsg("Ouverture appareil photo... Prends le QR en photo.", false);
+        cameraInput.click();
       }
 
       function waitForInlineQrLibraries(timeoutMs = 2500) {
@@ -4116,38 +4023,6 @@ ${labels}
         for (const v of variants) {
           const imageData = drawInlineQrVariant(img, v);
           const result = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
-          if (result && result.data) return result.data;
-        }
-
-        // Photos prises au téléphone contiennent souvent beaucoup d'arrière-plan.
-        // On essaie aussi plusieurs recadrages centrés afin que le QR occupe une
-        // plus grande partie de l'image avant de l'envoyer à jsQR.
-        const cropRatios = [0.85, 0.70, 0.55, 0.40];
-        for (const cropRatio of cropRatios) {
-          const sourceW = img.naturalWidth || img.width;
-          const sourceH = img.naturalHeight || img.height;
-          const cropW = Math.max(1, Math.round(sourceW * cropRatio));
-          const cropH = Math.max(1, Math.round(sourceH * cropRatio));
-          const sx = Math.max(0, Math.round((sourceW - cropW) / 2));
-          const sy = Math.max(0, Math.round((sourceH - cropH) / 2));
-          const canvas = document.createElement("canvas");
-          const maxCropSide = 1800;
-          const resize = Math.min(maxCropSide / Math.max(cropW, cropH), 1);
-          canvas.width = Math.max(1, Math.round(cropW * resize));
-          canvas.height = Math.max(1, Math.round(cropH * resize));
-          const ctx = canvas.getContext("2d", { willReadFrequently: true });
-          ctx.drawImage(img, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
-          let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          let result = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
-          if (result && result.data) return result.data;
-
-          const p = data.data;
-          for (let i = 0; i < p.length; i += 4) {
-            const y = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-            const value = y > 145 ? 255 : 0;
-            p[i] = p[i + 1] = p[i + 2] = value;
-          }
-          result = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
           if (result && result.data) return result.data;
         }
         return null;

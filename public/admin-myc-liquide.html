@@ -273,7 +273,6 @@
 }
 .lc-scan-inline-btn.blue {
   background: #0d6efd;
-  color:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;
 }
 .lc-scan-inline-actions button,
 .lc-scan-inline-actions label {
@@ -464,7 +463,6 @@
 .lc-pot-row-journal{background:#3498db}
 .lc-pot-row-storage{background:#21618c}
 .lc-pot-row-resume{background:#6c757d}
-.lc-pot-row-print{background:#6f42c1}
 .lc-pot-row-delete{background:#c0392b}
 .lc-lot-actions-line{
   display:flex;
@@ -853,20 +851,6 @@
 </style>
 <script>document.documentElement.classList.add('mtd-shell-loading');</script>
 
-
-<style id="mtd-live-qr-style">
-.mtd-live-qr-modal{position:fixed;inset:0;z-index:1000002;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72)}
-.mtd-live-qr-modal.open{display:flex}
-.mtd-live-qr-card{width:min(520px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:18px;padding:16px;box-shadow:0 22px 70px rgba(0,0,0,.35)}
-.mtd-live-qr-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
-.mtd-live-qr-head h3{margin:0;font-size:19px;font-weight:900;color:#1f7a41}
-.mtd-live-qr-close{border:0;border-radius:9px;padding:8px 11px;background:#c0392b;color:#fff;font-weight:900;cursor:pointer}
-.mtd-live-qr-reader{width:100%;min-height:300px;border-radius:12px;overflow:hidden;background:#111}
-.mtd-live-qr-reader video{width:100%!important;height:auto!important;border-radius:12px}
-.mtd-live-qr-help{margin-top:10px;color:#667085;font-size:12px;line-height:1.4;font-weight:700}
-.mtd-live-qr-status{margin-top:9px;color:#1f7a41;font-size:12px;font-weight:900;min-height:18px}
-</style>
-
 </head>
 <body>
   <script src="js/mtd-api-cache.js"></script>
@@ -893,7 +877,7 @@
 
     <div class="lc-scan-inline-actions">
       <button type="button" class="lc-scan-inline-btn secondary" onclick="startLcInlineQrCamera()">
-        Scanner QR
+        Caméra
       </button>
       <label class="lc-scan-inline-btn blue" for="lc-scan-inline-file">
         Importer image QR
@@ -1510,87 +1494,7 @@ function printSolution(){
 <p><strong>Isolation :</strong> ${esc(document.getElementById('solution-p3-readonly').value)}</p><p><strong>Nom :</strong> ${esc(document.getElementById('solution-name').value)}</p>
   <table><thead><tr><th>Composant</th><th>g/L</th></tr></thead><tbody>${comps.map(c=>`<tr><td>${esc(c.nom)}</td><td>${esc(c.qte)}</td></tr>`).join('')}</tbody></table>
   <p><strong>Volume préparé :</strong> ${esc(document.getElementById('solution-volume-total-l').value)} L</p><p><strong>Disponible :</strong> ${esc(document.getElementById('solution-volume-dispo-l').value)} L</p>
-  <h3>Protocole</h3><pre>${esc(document.getElementById('solution-protocole').value)}</pre>
-<div id="mtd-live-qr-modal" class="mtd-live-qr-modal" onclick="if(event.target===this) stopMtdLiveQrScanner()">
-  <div class="mtd-live-qr-card" role="dialog" aria-modal="true" aria-label="Scanner QR">
-    <div class="mtd-live-qr-head">
-      <h3>Scanner QR</h3>
-      <button type="button" class="mtd-live-qr-close" onclick="stopMtdLiveQrScanner()">Fermer</button>
-    </div>
-    <div id="mtd-live-qr-reader" class="mtd-live-qr-reader"></div>
-    <div class="mtd-live-qr-help">Place le QR au centre de l’image. Le journal s’ouvrira automatiquement dès que le code sera reconnu.</div>
-    <div id="mtd-live-qr-status" class="mtd-live-qr-status"></div>
-  </div>
-</div>
-
-
-<script id="mtd-live-qr-script">
-(function(){
-  let mtdLiveQrScanner = null;
-  let mtdLiveQrBusy = false;
-  let mtdLiveQrOnSuccess = null;
-
-  function mtdQrStatus(msg){ const el=document.getElementById('mtd-live-qr-status'); if(el) el.textContent=msg||''; }
-
-  async function waitForHtml5Qr(timeoutMs=6000){
-    const start=Date.now();
-    while(!window.Html5Qrcode && Date.now()-start<timeoutMs){ await new Promise(r=>setTimeout(r,80)); }
-    if(!window.Html5Qrcode) throw new Error('Bibliothèque QR non chargée. Recharge la page.');
-  }
-
-  async function startMtdLiveQrScanner(onSuccess){
-    if(mtdLiveQrBusy) return;
-    mtdLiveQrBusy=true;
-    mtdLiveQrOnSuccess=onSuccess;
-    const modal=document.getElementById('mtd-live-qr-modal');
-    const reader=document.getElementById('mtd-live-qr-reader');
-    if(!modal||!reader){ mtdLiveQrBusy=false; throw new Error('Lecteur QR introuvable.'); }
-    modal.classList.add('open');
-    mtdQrStatus('Ouverture de la caméra arrière…');
-    try{
-      await waitForHtml5Qr();
-      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
-      try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
-      reader.innerHTML='';
-      mtdLiveQrScanner=new Html5Qrcode('mtd-live-qr-reader');
-      const config={fps:12, qrbox:function(vw,vh){ const s=Math.floor(Math.min(vw,vh)*0.72); return {width:s,height:s}; }, aspectRatio:1.0};
-      await mtdLiveQrScanner.start(
-        {facingMode:{ideal:'environment'}},
-        config,
-        async function(decodedText){
-          if(!decodedText || !mtdLiveQrOnSuccess) return;
-          const cb=mtdLiveQrOnSuccess;
-          mtdLiveQrOnSuccess=null;
-          mtdQrStatus('QR détecté. Ouverture…');
-          await stopMtdLiveQrScanner();
-          try{ await cb(decodedText); }catch(e){ console.error(e); }
-        },
-        function(){ /* scan frames without QR are normal */ }
-      );
-      mtdQrStatus('Caméra active — vise le QR.');
-    }catch(e){
-      console.error('Live QR scanner:',e);
-      mtdQrStatus('Impossible d’ouvrir la caméra : '+(e?.message||e));
-      mtdLiveQrBusy=false;
-    }
-  }
-
-  async function stopMtdLiveQrScanner(){
-    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.stop(); } }catch(_){ }
-    try{ if(mtdLiveQrScanner){ await mtdLiveQrScanner.clear(); } }catch(_){ }
-    mtdLiveQrScanner=null;
-    mtdLiveQrBusy=false;
-    mtdLiveQrOnSuccess=null;
-    document.getElementById('mtd-live-qr-modal')?.classList.remove('open');
-    const reader=document.getElementById('mtd-live-qr-reader'); if(reader) reader.innerHTML='';
-  }
-
-  window.startMtdLiveQrScanner=startMtdLiveQrScanner;
-  window.stopMtdLiveQrScanner=stopMtdLiveQrScanner;
-})();
-</script>
-
-</body></html>`;
+  <h3>Protocole</h3><pre>${esc(document.getElementById('solution-protocole').value)}</pre></body></html>`;
   let w=window.open('', '_blank');w.document.write(html);w.document.close();w.focus();w.print();
 }
 
@@ -2233,7 +2137,6 @@ function renderPotRowsUnderLot(lot,pots){
           <a class="lc-pot-row-journal" href="admin-lc-cycle.html?lc_id=${lot.id}&pot_id=${potId}&mode=journal">Journal</a>
           ${lcPotFrigoButtonHtml(p,lot.id)}
           <button type="button" class="lc-pot-row-resume" onclick="resumeLcPotColumn(${lot.id},${potId})">Résumé</button>
-          <button type="button" class="lc-pot-row-print" onclick="printSingleLcPotFromMain(${lot.id},${potId})">🏷️ Imprimer étiquette</button>
           <button type="button" class="lc-pot-row-delete" onclick="deleteLcPotColumn(${lot.id},${potId})">Supprimer pot</button>
         </div>
       </td>
@@ -2297,7 +2200,6 @@ function renderLotsPage(){
       <td><span class="badge-pill warn">J${l.jour_actuel??0}</span></td>
       <td><div class="lc-lot-actions-line">
         <button class="btn-action btn-blue" style="max-width:160px;padding:8px 12px" onclick="window.location.href='admin-lc-cycle.html?lc_id=${l.id}'">Journal lot</button>
-        <button class="btn-action btn-purple" style="max-width:190px;padding:8px 12px" onclick="printLcLotFromMain(${Number(l.id)})">🏷️ Imprimer étiquette</button>
         <button class="btn-delete-lc" onclick="deleteLcLot(${Number(l.id)})">Supprimer lot</button>
       </div></td>
     </tr>${potRows}`;
@@ -2368,34 +2270,6 @@ function changeLcLotsPage(direction){
   renderLotsPage();
   document.getElementById('lc-lots-body')?.closest('.admin-card')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
-async function printLcLotFromMain(lotId){
-  lotId=Number(lotId);
-  const lot=(lcLotsCache||[]).find(x=>Number(x.id)===lotId);
-  if(!lot)return alert('Lot LC introuvable.');
-  try{
-    let pots=expandedLcPotsCache.get(lotId);
-    if(!Array.isArray(pots)) pots=await getPotsForLotColumn(lotId);
-    if(!Array.isArray(pots)||!pots.length)return alert('Aucun pot à imprimer dans ce lot.');
-    expandedLcPotsCache.set(lotId,pots);
-    printLcPotLabels(lot,pots);
-  }catch(e){alert('❌ Impression étiquettes : '+(e?.message||e));}
-}
-async function printSingleLcPotFromMain(lotId,potId){
-  lotId=Number(lotId);potId=Number(potId);
-  const lot=(lcLotsCache||[]).find(x=>Number(x.id)===lotId);
-  if(!lot)return alert('Lot LC introuvable.');
-  try{
-    let pots=expandedLcPotsCache.get(lotId);
-    if(!Array.isArray(pots)) pots=await getPotsForLotColumn(lotId);
-    const pot=(pots||[]).find(p=>Number(p.id||p.pot_id||p.lc_pot_id)===potId);
-    if(!pot)return alert('Pot LC introuvable.');
-    expandedLcPotsCache.set(lotId,pots);
-    printLcPotLabels(lot,[pot]);
-  }catch(e){alert('❌ Impression étiquette : '+(e?.message||e));}
-}
-window.printLcLotFromMain=printLcLotFromMain;
-window.printSingleLcPotFromMain=printSingleLcPotFromMain;
-
 async function deleteLcLot(id){
   if(!id)return;
   const lot=(lcLotsCache||[]).find(x=>Number(x.id)===Number(id));
@@ -2679,12 +2553,13 @@ function openScannedLcPotInline() {
 }
 
 function startLcInlineQrCamera() {
-  setLcScanInlineMsg("Caméra active — vise le QR.", false);
-  startMtdLiveQrScanner(async function(code){
-    const input=document.getElementById("lc-scan-inline-code");
-    if(input) input.value=code;
-    await openScannedLcValue(code);
-  }).catch(function(e){ setLcScanInlineMsg("❌ "+(e.message||e)); });
+  let cameraInput = document.getElementById("lc-scan-inline-camera-file");
+  if (!cameraInput) {
+    setLcScanInlineMsg("Champ caméra introuvable. Recharge la page.");
+    return;
+  }
+  setLcScanInlineMsg("Ouverture appareil photo... Prends le QR en photo.", false);
+  cameraInput.click();
 }
 
 function waitForLcQrLibraries(timeoutMs = 3500) {
@@ -2795,33 +2670,6 @@ async function decodeLcQrFromFile(file) {
         qr = jsQR(data.data, canvas.width, canvas.height, { inversionAttempts: "attemptBoth" });
         if (qr && qr.data) return qr.data;
       }
-
-      // Renfort pour les photos téléphone où le QR est petit dans l'image.
-      const sourceW = img.naturalWidth || img.width;
-      const sourceH = img.naturalHeight || img.height;
-      for (const cropRatio of [0.85, 0.70, 0.55, 0.40]) {
-        const cropW = Math.max(1, Math.round(sourceW * cropRatio));
-        const cropH = Math.max(1, Math.round(sourceH * cropRatio));
-        const sx = Math.max(0, Math.round((sourceW - cropW) / 2));
-        const sy = Math.max(0, Math.round((sourceH - cropH) / 2));
-        const canvas = document.createElement("canvas");
-        const ratio = Math.min(1800 / Math.max(cropW, cropH), 1);
-        canvas.width = Math.max(1, Math.round(cropW * ratio));
-        canvas.height = Math.max(1, Math.round(cropH * ratio));
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
-        let data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
-        if (qr && qr.data) return qr.data;
-        const d = data.data;
-        for (let i = 0; i < d.length; i += 4) {
-          const gray = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) | 0;
-          const v = gray > 145 ? 255 : 0;
-          d[i] = d[i+1] = d[i+2] = v;
-        }
-        qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
-        if (qr && qr.data) return qr.data;
-      }
     } finally {
       try { URL.revokeObjectURL(img.src); } catch (_) {}
     }
@@ -2864,7 +2712,6 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 </script>
-<script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded',function(){
